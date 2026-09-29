@@ -54,6 +54,72 @@ export function imageAnalysisRequestJsonSchema(): Record<string, unknown> {
   return stripSchemaKeywords(imageAnalysisModelSchema.toJSONSchema());
 }
 
+const listItemModelSchema = z.object({
+  text: z.string().describe("One point copied from the slide, as written."),
+});
+
+const blockProvenanceSchema = z
+  .enum(["source", "interpretation"])
+  .optional()
+  .describe("source is text from the slide or image. interpretation is a description or relationship.");
+
+/**
+ * Shallow notes shape for Gemini. List items are text only.
+ * No `.min()`: Zod's JSON Schema emits `minLength` / `minItems`, which Gemini ignores.
+ * The slide number is assigned by our code after the response is checked.
+ */
+export const slideNotesModelSchema = z.object({
+  title: z.string().optional().describe("The slide title, copied as written."),
+  blocks: z
+    .array(
+      z.discriminatedUnion("type", [
+        z.object({
+          type: z.literal("paragraph"),
+          content: z.string(),
+          provenance: blockProvenanceSchema,
+        }),
+        z.object({
+          type: z.literal("bullets"),
+          items: z.array(listItemModelSchema),
+          provenance: blockProvenanceSchema,
+        }),
+        z.object({
+          type: z.literal("numbered"),
+          items: z.array(listItemModelSchema),
+          provenance: blockProvenanceSchema,
+        }),
+        z.object({
+          type: z.literal("code"),
+          language: z.string().optional(),
+          content: z.string(),
+          provenance: blockProvenanceSchema,
+        }),
+        z.object({
+          type: z.literal("table"),
+          rows: z.array(z.array(z.string())),
+          header: z.boolean().optional(),
+          provenance: blockProvenanceSchema,
+        }),
+        z.object({
+          type: z.literal("divider"),
+          provenance: blockProvenanceSchema,
+        }),
+      ]),
+    )
+    .describe("Every point from this slide. Do not summarize the slide away."),
+  sourceReferences: z.array(
+    z.object({
+      slideNumber: z.number().int().positive(),
+      elementId: z.string().optional(),
+    }),
+  ),
+  warnings: z.array(z.string()).optional().describe("Uncertainties. Not facts from the slide."),
+});
+
+export function slideNotesRequestJsonSchema(): Record<string, unknown> {
+  return stripSchemaKeywords(slideNotesModelSchema.toJSONSchema());
+}
+
 function stripSchemaKeywords(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return {};

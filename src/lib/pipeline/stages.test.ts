@@ -5,8 +5,11 @@ import {
   initialStages,
   stagesAfterAnalyze,
   stagesAfterExtract,
+  stagesAfterStructure,
+  stagesAfterStructureStopped,
   stagesComplete,
   stagesWhileAnalyzing,
+  stagesWhileStructuring,
 } from "@/lib/pipeline/stages";
 
 describe("pipeline stages", () => {
@@ -57,5 +60,20 @@ describe("pipeline stages", () => {
     const done = stagesAfterAnalyze();
     expect(done.map((stage) => stage.status)).toEqual(["done", "done", "pending", "pending"]);
     expect(done.slice(2).every((stage) => stage.detail === "Has not started.")).toBe(true);
+  });
+
+  it("finishes structuring while organize still has not started", () => {
+    const structuring = stagesWhileStructuring();
+    expect(structuring.map((stage) => stage.status)).toEqual(["done", "done", "active", "pending"]);
+    expect(structuring[3]?.detail).toBe("Has not started.");
+
+    const done = stagesAfterStructure();
+    expect(done.map((stage) => stage.status)).toEqual(["done", "done", "done", "pending"]);
+    expect(done[3]?.detail).toBe("Has not started.");
+
+    const stopped = stagesAfterStructureStopped();
+    expect(stopped.map((stage) => stage.status)).toEqual(["done", "done", "pending", "pending"]);
+    expect(stopped[2]?.detail).toBe("Stopped before every slide was structured.");
+    expect(stopped[3]?.detail).toBe("Has not started.");
   });
 });

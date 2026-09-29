@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { elementsInReadingOrder, slideHeading } from "@/lib/ppt/reading-order";
+import { elementsInReadingOrder, slideHeading, slideTitleOrFirstLine } from "@/lib/ppt/reading-order";
 import type { Slide, SlideElement } from "@/lib/ppt/schema";
 
 describe("reading order", () => {
@@ -54,5 +54,7 @@ describe("reading order", () => {
     expect(slideHeading(untitled)).toBe("First real line");
 
     expect(slideHeading({ slideNumber: 3, elements: [] })).toBe("Untitled slide");
+    expect(slideTitleOrFirstLine(titled)).toBe("Title line");
+    expect(slideTitleOrFirstLine({ slideNumber: 3, elements: [] })).toBeUndefined();
   });
 });

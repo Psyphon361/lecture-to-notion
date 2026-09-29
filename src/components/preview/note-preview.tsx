@@ -1,47 +1,53 @@
 import type { ReactNode } from "react";
 
-import { mockNoteDocument } from "@/lib/documents/mock-note";
-import type { NoteBlock, NoteListItem } from "@/lib/documents/schema";
+import { StoredImage } from "@/components/assets/stored-image";
+import type { NoteBlock, NoteListItem, SlideNotes } from "@/lib/documents/schema";
+import { storedAssetSrc } from "@/lib/storage/asset-url";
+import type { Slide } from "@/lib/ppt/schema";
 
-const document = mockNoteDocument;
+export function NotePreview({
+  notes,
+  slides,
+  slideNumber,
+}: {
+  notes?: SlideNotes[];
+  slides?: Slide[];
+  slideNumber: number;
+}) {
+  const slideNotes = notes?.find((item) => item.slideNumber === slideNumber);
+  const source = slides?.find((item) => item.slideNumber === slideNumber);
+  const blockAssetIds = new Set(
+    slideNotes?.blocks.flatMap((block) => (block.type === "image" ? [block.assetId] : [])) ?? [],
+  );
 
-export function NotePreview() {
+  if (!slideNotes) {
+    if (notes === undefined) return null;
+    return (
+      <article className="flex flex-col gap-3">
+        <p className="text-sm text-zinc-500">This slide was not structured.</p>
+      </article>
+    );
+  }
+
   return (
-    <article className="mx-auto w-full max-w-3xl">
-      <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-        Sample preview. This document was not generated from your file.
-      </p>
-      <h1 className="mt-3 text-3xl font-semibold tracking-tight">{document.title}</h1>
-      <div className="mt-8 flex flex-col gap-8">
-        {document.sections.map((section, index) => (
-          <section key={`${section.heading ?? "section"}-${index}`} className="flex flex-col gap-3">
-            {section.heading ? <SectionHeading level={section.level ?? 2} text={section.heading} /> : null}
-            {section.blocks.map((block, blockIndex) => (
-              <BlockView key={blockIndex} block={block} />
-            ))}
-          </section>
-        ))}
-      </div>
-      <div className="mt-10 border-t border-zinc-200 pt-6 dark:border-zinc-800">
-        <button
-          type="button"
-          disabled
-          className="rounded-full bg-zinc-200 px-5 py-2.5 text-sm font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
-        >
-          Export to Notion
-        </button>
-        <p className="mt-2 text-sm text-zinc-500">
-          Export stays off until the notes pass a quality check.
-        </p>
-      </div>
+    <article className="flex flex-col gap-3">
+      <h2 className="text-2xl font-semibold">
+        Slide {slideNotes.slideNumber}
+        {slideNotes.title ? `. ${slideNotes.title}` : ""}
+      </h2>
+      <SlidePictures slide={source} skipAssetIds={blockAssetIds} />
+      {slideNotes.warnings && slideNotes.warnings.length > 0 ? (
+        <ul className="list-disc space-y-1 pl-5 text-sm text-amber-800 dark:text-amber-200">
+          {slideNotes.warnings.map((warning, warningIndex) => (
+            <li key={`${warning}-${warningIndex}`}>{warning}</li>
+          ))}
+        </ul>
+      ) : null}
+      {slideNotes.blocks.map((block, blockIndex) => (
+        <BlockView key={blockIndex} block={block} />
+      ))}
     </article>
   );
-}
-
-function SectionHeading({ level, text }: { level: 1 | 2 | 3; text: string }) {
-  if (level === 1) return <h2 className="text-2xl font-semibold">{text}</h2>;
-  if (level === 3) return <h4 className="text-lg font-semibold">{text}</h4>;
-  return <h3 className="text-xl font-semibold">{text}</h3>;
 }
 
 function BlockView({ block }: { block: NoteBlock }) {
@@ -75,14 +81,7 @@ function BlockView({ block }: { block: NoteBlock }) {
       body = <hr className="border-zinc-200 dark:border-zinc-800" />;
       break;
     case "image":
-      body = (
-        <figure className="flex flex-col gap-2">
-          <div className="flex h-36 items-center justify-center rounded-md border border-dashed border-zinc-300 text-sm text-zinc-500 dark:border-zinc-700">
-            Image {block.assetId}
-          </div>
-          {block.caption ? <figcaption className="text-sm text-zinc-500">{block.caption}</figcaption> : null}
-        </figure>
-      );
+      body = <ImageBlock assetId={block.assetId} alt={block.alt} caption={block.caption} />;
       break;
   }
 
@@ -94,6 +93,48 @@ function BlockView({ block }: { block: NoteBlock }) {
       </p>
       {body}
     </div>
+  );
+}
+
+function SlidePictures({ slide, skipAssetIds }: { slide?: Slide; skipAssetIds: Set<string> }) {
+  const images = (slide?.elements ?? []).flatMap((element) =>
+    element.type === "image" && storedAssetSrc(element.assetId) && !skipAssetIds.has(element.assetId)
+      ? [element]
+      : [],
+  );
+  if (images.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-3">
+      {images.map((image) => (
+        <figure key={image.id} className="flex flex-col gap-2">
+          <StoredImage assetId={image.assetId} alt={image.altText || "Image"} />
+        </figure>
+      ))}
+    </div>
+  );
+}
+
+function ImageBlock({
+  assetId,
+  alt,
+  caption,
+}: {
+  assetId: string;
+  alt?: string;
+  caption?: string;
+}) {
+  const src = storedAssetSrc(assetId);
+  return (
+    <figure className="flex flex-col gap-2">
+      {src ? (
+        <StoredImage assetId={assetId} alt={alt || caption || "Image"} />
+      ) : (
+        <div className="flex h-36 items-center justify-center rounded-md border border-dashed border-zinc-300 text-sm text-zinc-500 dark:border-zinc-700">
+          Image {assetId}
+        </div>
+      )}
+      {caption ? <figcaption className="text-sm text-zinc-500">{caption}</figcaption> : null}
+    </figure>
   );
 }
 

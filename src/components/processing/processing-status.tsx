@@ -1,14 +1,44 @@
 import type { StageState } from "@/lib/pipeline/stages";
 
-export function ProcessingStatus({
-  title,
-  summary,
-  stages,
-}: {
-  title: string;
-  summary: string;
-  stages: StageState[];
-}) {
+/** One line for the review screen. Processing screens keep the full stage list. */
+export function reviewStageLine(stages: StageState[]): string {
+  const organize = stages.find((stage) => stage.id === "organize");
+  const tail =
+    organize?.status === "done" ? "Organization is done." : "Organization has not started.";
+  const structure = stages.find((stage) => stage.id === "process-slides");
+  if (structure?.status === "done") return `Structured. ${tail}`;
+  if (structure?.detail === "Stopped before every slide was structured.") {
+    return `Structuring stopped. ${tail}`;
+  }
+  const analyze = stages.find((stage) => stage.id === "analyze-images");
+  if (analyze?.status === "done") return `Images analyzed. ${tail}`;
+  if (analyze?.status === "active") return `Analyzing images. ${tail}`;
+  if (structure?.status === "active") return `Structuring. ${tail}`;
+  return `Extracted. ${tail}`;
+}
+
+type ProcessingStatusProps =
+  | {
+      compact?: false;
+      title: string;
+      summary: string;
+      stages: StageState[];
+    }
+  | {
+      compact: true;
+      stages: StageState[];
+    };
+
+export function ProcessingStatus(props: ProcessingStatusProps) {
+  if (props.compact) {
+    return (
+      <p className="text-sm text-zinc-600 dark:text-zinc-400" aria-live="polite">
+        {reviewStageLine(props.stages)}
+      </p>
+    );
+  }
+
+  const { title, summary, stages } = props;
   return (
     <section className="mx-auto w-full max-w-xl" aria-live="polite">
       <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>

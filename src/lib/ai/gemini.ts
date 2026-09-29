@@ -1,14 +1,21 @@
 import { ApiError, GoogleGenAI } from "@google/genai";
 
 import { PROMPT_VERSION, imageAnalysisPrompt } from "@/lib/ai/prompts/image-analysis";
-import type { AIProvider, ImageInput } from "@/lib/ai/provider";
+import {
+  PROMPT_VERSION as SLIDE_PROMPT_VERSION,
+  slideProcessingPrompt,
+} from "@/lib/ai/prompts/slide-processing";
+import type { AIProvider, ImageInput, SlideContext } from "@/lib/ai/provider";
+import { fallbackSlideNotes } from "@/lib/ai/slide-fallback";
 import {
   imageAnalysisModelSchema,
   imageAnalysisRequestJsonSchema,
   imageAnalysisSchema,
+  slideNotesModelSchema,
+  slideNotesRequestJsonSchema,
   type ImageAnalysis,
 } from "@/lib/ai/schema";
-import type { NoteDocument, SlideNotes } from "@/lib/documents/schema";
+import { slideNotesSchema, type NoteDocument, type SlideNotes } from "@/lib/documents/schema";
 
 /**
  * Free-tier Flash used when GEMINI_MODEL is unset.
@@ -59,9 +66,9 @@ export interface ImageAnalysisSuccess {
 export interface GeminiContentRequest {
   model: string;
   prompt: string;
-  mimeType: string;
-  bytes: Uint8Array;
   responseJsonSchema: Record<string, unknown>;
+  mimeType?: string;
+  bytes?: Uint8Array;
 }
 
 export interface GeminiContentResponse {
@@ -161,14 +168,136 @@ export async function analyzeImageWithGemini(input: ImageInput): Promise<ImageAn
   });
 }
 
+export interface SlideProcessSuccess {
+  notes: SlideNotes;
+  model: string;
+  promptVersion: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  latencyMs: number;
+  usedFallback: boolean;
+}
+
+const SLIDE_FALLBACK_WARNING =
+  "The model response did not match the expected shape, so this slide keeps its source text.";
+
+/**
+ * One slide, one repair retry, then the deterministic slide text.
+ * 429 is retried with backoff. 5xx is not retried and does not fall back.
+ * The request has no image bytes. The log line has no slide text.
+ */
+export async function processSlideDetailed(
+  input: SlideContext,
+  deps: AnalyzeDeps,
+): Promise<SlideProcessSuccess> {
+  const model = deps.model ?? geminiModelId();
+  const sleep = deps.sleep ?? delay;
+  const now = deps.now ?? Date.now;
+  const log = deps.log ?? logSlideLine;
+  const responseJsonSchema = slideNotesRequestJsonSchema();
+  let validationError: string | undefined;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const started = now();
+    let response: GeminiContentResponse;
+    try {
+      response = await withRateLimitRetries(
+        () =>
+          deps.generate({
+            model,
+            prompt: slideProcessingPrompt({
+              slide: input.slide,
+              outcomes: input.outcomes,
+              previousLine: input.previousLine,
+              nextLine: input.nextLine,
+              validationError,
+            }),
+            responseJsonSchema,
+          }),
+        sleep,
+      );
+    } catch (error) {
+      log(
+        slideCallLog({
+          model,
+          inputTokens: null,
+          outputTokens: null,
+          latencyMs: now() - started,
+          outcome: "error",
+        }),
+      );
+      throw error;
+    }
+
+    const latencyMs = now() - started;
+    const parsed = readModelSlideNotes(response.text, input.slide.slideNumber);
+    if (parsed.ok) {
+      log(
+        slideCallLog({
+          model,
+          inputTokens: response.inputTokens,
+          outputTokens: response.outputTokens,
+          latencyMs,
+          outcome: "ok",
+        }),
+      );
+      return {
+        notes: parsed.notes,
+        model,
+        promptVersion: SLIDE_PROMPT_VERSION,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        latencyMs,
+        usedFallback: false,
+      };
+    }
+
+    validationError = parsed.message;
+    const giveUp = attempt === 1;
+    log(
+      slideCallLog({
+        model,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        latencyMs,
+        outcome: giveUp ? "fallback" : "invalid",
+      }),
+    );
+    if (!giveUp) continue;
+
+    return {
+      notes: notesWithFallbackWarning(fallbackSlideNotes(input.slide, input.outcomes)),
+      model,
+      promptVersion: SLIDE_PROMPT_VERSION,
+      inputTokens: response.inputTokens,
+      outputTokens: response.outputTokens,
+      latencyMs,
+      usedFallback: true,
+    };
+  }
+
+  throw new Error("Slide processing ended without a result.");
+}
+
+export async function processSlideWithGemini(input: SlideContext): Promise<SlideProcessSuccess> {
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  if (!apiKey) throw new MissingGeminiKeyError();
+  const ai = new GoogleGenAI({ apiKey });
+  return processSlideDetailed(input, {
+    model: geminiModelId(),
+    generate: (request) => generateWithClient(ai, request),
+  });
+}
+
 export function createGeminiProvider(): AIProvider {
   return {
     async analyzeImage(input: ImageInput): Promise<ImageAnalysis> {
       const result = await analyzeImageWithGemini(input);
       return result.analysis;
     },
-    processSlide(): Promise<SlideNotes> {
-      return Promise.reject(new Error("Slide processing has not started."));
+    async processSlide(input: SlideContext): Promise<SlideNotes> {
+      const result = await processSlideWithGemini(input);
+      return result.notes;
     },
     organizeNotes(): Promise<NoteDocument> {
       return Promise.reject(new Error("Note organization has not started."));
@@ -198,6 +327,23 @@ export function analyzeErrorResponse(error: unknown): { status: number; message:
   return { status: 500, message: "Image analysis failed. Try again." };
 }
 
+function contentParts(
+  request: GeminiContentRequest,
+): Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> {
+  const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [
+    { text: request.prompt },
+  ];
+  if (request.bytes !== undefined && request.mimeType) {
+    parts.push({
+      inlineData: {
+        mimeType: request.mimeType,
+        data: Buffer.from(request.bytes).toString("base64"),
+      },
+    });
+  }
+  return parts;
+}
+
 async function generateWithClient(
   ai: GoogleGenAI,
   request: GeminiContentRequest,
@@ -208,15 +354,7 @@ async function generateWithClient(
       contents: [
         {
           role: "user",
-          parts: [
-            { text: request.prompt },
-            {
-              inlineData: {
-                mimeType: request.mimeType,
-                data: Buffer.from(request.bytes).toString("base64"),
-              },
-            },
-          ],
+          parts: contentParts(request),
         },
       ],
       config: {
@@ -250,6 +388,39 @@ function readModelAnalysis(
   const analysis = imageAnalysisSchema.safeParse({ ...fields.data, imageId });
   if (!analysis.success) return { ok: false, message: analysis.error.message };
   return { ok: true, analysis: analysis.data };
+}
+
+function readModelSlideNotes(
+  text: string | undefined,
+  slideNumber: number,
+): { ok: true; notes: SlideNotes } | { ok: false; message: string } {
+  if (!text?.trim()) return { ok: false, message: "The model returned no JSON." };
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return { ok: false, message: "The model returned text that is not JSON." };
+  }
+  const fields = slideNotesModelSchema.safeParse(payload);
+  if (!fields.success) return { ok: false, message: fields.error.message };
+  const sourceReferences = fields.data.sourceReferences.flatMap((reference) => {
+    const elementId = reference.elementId?.trim();
+    return [{ slideNumber, ...(elementId ? { elementId } : {}) }];
+  });
+  const notes = slideNotesSchema.safeParse({
+    ...fields.data,
+    slideNumber,
+    sourceReferences: sourceReferences.length > 0 ? sourceReferences : [{ slideNumber }],
+  });
+  if (!notes.success) return { ok: false, message: notes.error.message };
+  return { ok: true, notes: notes.data };
+}
+
+function notesWithFallbackWarning(notes: SlideNotes): SlideNotes {
+  return slideNotesSchema.parse({
+    ...notes,
+    warnings: [...(notes.warnings ?? []), SLIDE_FALLBACK_WARNING],
+  });
 }
 
 async function withRateLimitRetries(
@@ -311,6 +482,28 @@ function logLine(input: {
 }
 
 function logImageAnalysisLine(line: string): void {
+  console.info(line);
+}
+
+function slideCallLog(input: {
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  latencyMs: number;
+  outcome: "ok" | "invalid" | "fallback" | "error";
+}): string {
+  return [
+    "slide-processing",
+    `model=${input.model}`,
+    `prompt=${SLIDE_PROMPT_VERSION}`,
+    `inputTokens=${input.inputTokens ?? "unknown"}`,
+    `outputTokens=${input.outputTokens ?? "unknown"}`,
+    `latencyMs=${input.latencyMs}`,
+    `outcome=${input.outcome}`,
+  ].join(" ");
+}
+
+function logSlideLine(line: string): void {
   console.info(line);
 }
 

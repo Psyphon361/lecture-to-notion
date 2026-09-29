@@ -17,8 +17,8 @@ export function elementsInReadingOrder(elements: SlideElement[]): SlideElement[]
     .map((item) => item.element);
 }
 
-/** Title placeholder text, or the first non-empty line when the slide has no title. */
-export function slideHeading(slide: Slide): string {
+/** Title placeholder text, or the first non-empty line. Empty when the slide has neither. */
+export function slideTitleOrFirstLine(slide: Slide): string | undefined {
   const ordered = elementsInReadingOrder(slide.elements);
   const title = ordered.find((element) => element.type === "text" && element.isTitle);
   const fromTitle = title?.type === "text" ? firstLine(title.paragraphs) : "";
@@ -28,7 +28,12 @@ export function slideHeading(slide: Slide): string {
     const line = firstLine(element.paragraphs);
     if (line) return line;
   }
-  return "Untitled slide";
+  return undefined;
+}
+
+/** Title or first line, with a label when the slide has no text. */
+export function slideHeading(slide: Slide): string {
+  return slideTitleOrFirstLine(slide) ?? "Untitled slide";
 }
 
 function firstLine(paragraphs: TextParagraph[]): string {

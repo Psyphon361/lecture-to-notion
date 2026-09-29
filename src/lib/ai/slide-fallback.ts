@@ -1,0 +1,196 @@
+import type { ImageOutcome } from "@/lib/ai/analyze-response";
+import type { ImageAnalysis } from "@/lib/ai/schema";
+import type { NoteBlock, NoteListItem, SlideNotes } from "@/lib/documents/schema";
+import { slideNotesSchema } from "@/lib/documents/schema";
+import { elementsInReadingOrder } from "@/lib/ppt/reading-order";
+import type { Slide, TextParagraph } from "@/lib/ppt/schema";
+
+const EMPTY_SLIDE_WARNING = "This slide had no text to keep.";
+
+/**
+ * Notes from the slide itself when the model response cannot be used.
+ * Native text keeps its bullet kind. Image readings become source or interpretation.
+ * A skipped image adds nothing.
+ */
+export function fallbackSlideNotes(slide: Slide, outcomes: ImageOutcome[] = []): SlideNotes {
+  const readings = readingsForSlide(slide, outcomes);
+  const blocks: NoteBlock[] = [];
+  const warnings: string[] = [];
+  const sourceReferences: SlideNotes["sourceReferences"] = [];
+  let title: string | undefined;
+  let usedTitle = false;
+
+  for (const element of elementsInReadingOrder(slide.elements)) {
+    if (element.type === "text" && element.isTitle && !usedTitle) {
+      const heading = titleFrom(element.paragraphs);
+      if (heading) {
+        title = heading;
+        usedTitle = true;
+        sourceReferences.push({ slideNumber: slide.slideNumber, elementId: element.id });
+        continue;
+      }
+    }
+
+    const contributed = appendElement(element, readings, blocks, warnings);
+    if (contributed) {
+      sourceReferences.push({ slideNumber: slide.slideNumber, elementId: element.id });
+    }
+  }
+
+  if (blocks.length === 0 && title === undefined && warnings.length === 0) {
+    warnings.push(EMPTY_SLIDE_WARNING);
+  }
+
+  return slideNotesSchema.parse({
+    slideNumber: slide.slideNumber,
+    ...(title === undefined ? {} : { title }),
+    blocks,
+    sourceReferences:
+      sourceReferences.length > 0 ? sourceReferences : [{ slideNumber: slide.slideNumber }],
+    ...(warnings.length > 0 ? { warnings } : {}),
+  });
+}
+
+export function readingsForSlide(slide: Slide, outcomes: ImageOutcome[]): Map<string, ImageOutcome> {
+  const imageIds = new Set(
+    slide.elements.flatMap((element) => (element.type === "image" ? [element.id] : [])),
+  );
+  const readings = new Map<string, ImageOutcome>();
+  for (const analysis of slide.imageAnalyses ?? []) {
+    if (!imageIds.has(analysis.imageId)) continue;
+    readings.set(analysis.imageId, { imageId: analysis.imageId, status: "analyzed", analysis });
+  }
+  for (const outcome of outcomes) {
+    if (!imageIds.has(outcome.imageId)) continue;
+    readings.set(outcome.imageId, outcome);
+  }
+  return readings;
+}
+
+function appendElement(
+  element: Slide["elements"][number],
+  readings: Map<string, ImageOutcome>,
+  blocks: NoteBlock[],
+  warnings: string[],
+): boolean {
+  if (element.type === "text") {
+    const next = blocksFromParagraphs(element.paragraphs);
+    blocks.push(...next);
+    return next.length > 0;
+  }
+  if (element.type === "table") {
+    if (element.rows.length === 0) return false;
+    blocks.push({ type: "table", rows: element.rows, provenance: "source" });
+    return true;
+  }
+  if (element.type === "shape") {
+    if (!element.text?.trim()) return false;
+    blocks.push({ type: "paragraph", content: element.text, provenance: "source" });
+    return true;
+  }
+  if (element.type === "image") return appendImage(readings.get(element.id), blocks, warnings);
+  return false;
+}
+
+function appendImage(
+  outcome: ImageOutcome | undefined,
+  blocks: NoteBlock[],
+  warnings: string[],
+): boolean {
+  if (!outcome || outcome.status === "skipped") return false;
+  if (outcome.status === "unanalyzed") {
+    warnings.push(outcome.warning);
+    return true;
+  }
+  return appendAnalysis(outcome.analysis, blocks, warnings);
+}
+
+function appendAnalysis(analysis: ImageAnalysis, blocks: NoteBlock[], warnings: string[]): boolean {
+  let contributed = false;
+  const extracted = written(analysis.extractedText);
+  if (extracted) {
+    blocks.push({ type: "paragraph", content: extracted, provenance: "source" });
+    contributed = true;
+  }
+  const description = written(analysis.description);
+  if (description) {
+    blocks.push({ type: "paragraph", content: description, provenance: "interpretation" });
+    contributed = true;
+  }
+  const relationships = (analysis.relationships ?? []).map(written).filter((item): item is string => item !== undefined);
+  if (relationships.length > 0) {
+    blocks.push({
+      type: "bullets",
+      provenance: "interpretation",
+      items: relationships.map((text) => ({ text })),
+    });
+    contributed = true;
+  }
+  for (const uncertainty of analysis.uncertainties ?? []) {
+    const warning = written(uncertainty);
+    if (!warning) continue;
+    warnings.push(warning);
+    contributed = true;
+  }
+  return contributed;
+}
+
+function blocksFromParagraphs(paragraphs: TextParagraph[]): NoteBlock[] {
+  const blocks: NoteBlock[] = [];
+  let index = 0;
+  while (index < paragraphs.length) {
+    const current = paragraphs[index];
+    if (!current || !written(current.text)) {
+      index += 1;
+      continue;
+    }
+    const kind = current.bullet ?? "none";
+    if (kind === "none") {
+      blocks.push({ type: "paragraph", content: current.text, provenance: "source" });
+      index += 1;
+      continue;
+    }
+    const run: TextParagraph[] = [];
+    while (index < paragraphs.length) {
+      const next = paragraphs[index];
+      if (!next || (next.bullet ?? "none") !== kind) break;
+      if (written(next.text)) run.push(next);
+      index += 1;
+    }
+    const items = nestItems(run);
+    if (items.length === 0) continue;
+    blocks.push({
+      type: kind === "number" ? "numbered" : "bullets",
+      items,
+      provenance: "source",
+    });
+  }
+  return blocks;
+}
+
+function nestItems(paragraphs: TextParagraph[]): NoteListItem[] {
+  const roots: NoteListItem[] = [];
+  const stack: { level: number; item: NoteListItem }[] = [];
+  for (const paragraph of paragraphs) {
+    const item: NoteListItem = { text: paragraph.text };
+    while (stack.length > 0 && (stack[stack.length - 1]?.level ?? 0) >= paragraph.level) {
+      stack.pop();
+    }
+    const parent = stack[stack.length - 1];
+    if (parent) parent.item.children = [...(parent.item.children ?? []), item];
+    else roots.push(item);
+    stack.push({ level: paragraph.level, item });
+  }
+  return roots;
+}
+
+function titleFrom(paragraphs: TextParagraph[]): string | undefined {
+  const lines = paragraphs.map((paragraph) => paragraph.text.trim()).filter((line) => line.length > 0);
+  if (lines.length === 0) return undefined;
+  return lines.join("\n");
+}
+
+function written(value: string | undefined): string | undefined {
+  if (!value || value.trim().length === 0) return undefined;
+  return value;
+}

@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 
-import { NotePreview } from "@/components/preview/note-preview";
 import { ProcessingStatus } from "@/components/processing/processing-status";
-import { ExtractionReview } from "@/components/review/extraction-review";
+import { SlideWorkspace } from "@/components/review/slide-workspace";
 import { UploadDropzone } from "@/components/upload/upload-dropzone";
 import {
   analyzeFailureSchema,
@@ -13,21 +12,37 @@ import {
   presentationWithAnalyses,
   type ImageOutcome,
 } from "@/lib/ai/analyze-response";
+import { structureSlides, type SlidePostResult } from "@/lib/ai/structure-slides";
+import type { SlideNotes } from "@/lib/documents/schema";
 import { parseFailureSchema, parseSuccessSchema } from "@/lib/ppt/parse-response";
 import type { Presentation } from "@/lib/ppt/schema";
 import {
   initialStages,
-  stagesAfterAnalyze,
-  stagesAfterExtract,
+  stagesAfterStructure,
+  stagesAfterStructureStopped,
   stagesWhileAnalyzing,
+  stagesWhileStructuring,
   type StageState,
 } from "@/lib/pipeline/stages";
+
+type StoredRun = {
+  filename: string;
+  runId: string;
+  presentation: Presentation;
+  warnings: string[];
+};
 
 type FlowState =
   | { phase: "idle" }
   | { phase: "rejected"; message: string }
   | { phase: "extracting"; filename: string; stages: StageState[] }
   | { phase: "analyzing"; filename: string; stages: StageState[] }
+  | { phase: "structuring"; filename: string; stages: StageState[]; completed: number; total: number }
+  | (StoredRun & {
+      phase: "analyze-stopped";
+      message: string;
+      showExtracted: boolean;
+    })
   | {
       phase: "review";
       filename: string;
@@ -35,7 +50,8 @@ type FlowState =
       presentation: Presentation;
       warnings: string[];
       outcomes: ImageOutcome[];
-      analysisMessage?: string;
+      notes?: SlideNotes[];
+      structureMessage?: string;
     };
 
 export function LectureFlow() {
@@ -54,35 +70,11 @@ export function LectureFlow() {
       const payload: unknown = await response.json();
       const success = parseSuccessSchema.safeParse(payload);
       if (response.ok && success.success) {
-        const filename = success.data.presentation.filename;
-        setFlow({
-          phase: "analyzing",
-          filename,
-          stages: stagesWhileAnalyzing(),
-        });
-        const analyzed = await requestImageAnalysis(
-          success.data.runId,
-          success.data.presentation,
-        );
-        if (analyzed.ok) {
-          setFlow({
-            phase: "review",
-            filename,
-            stages: stagesAfterAnalyze(),
-            presentation: presentationWithAnalyses(success.data.presentation, analyzed.outcomes),
-            warnings: success.data.warnings,
-            outcomes: analyzed.outcomes,
-          });
-          return;
-        }
-        setFlow({
-          phase: "review",
-          filename,
-          stages: stagesAfterExtract(),
+        await analyzeAndStructure({
+          filename: success.data.presentation.filename,
+          runId: success.data.runId,
           presentation: success.data.presentation,
           warnings: success.data.warnings,
-          outcomes: [],
-          analysisMessage: analyzed.message,
         });
         return;
       }
@@ -99,6 +91,64 @@ export function LectureFlow() {
         message: "The PowerPoint could not be read. Try the file again.",
       });
     }
+  }
+
+  async function analyzeAndStructure(run: StoredRun) {
+    setFlow({
+      phase: "analyzing",
+      filename: run.filename,
+      stages: stagesWhileAnalyzing(),
+    });
+    const analyzed = await requestImageAnalysis(run.runId, run.presentation);
+    if (!analyzed.ok) {
+      setFlow({
+        phase: "analyze-stopped",
+        filename: run.filename,
+        runId: run.runId,
+        presentation: run.presentation,
+        warnings: run.warnings,
+        message: analyzed.message,
+        showExtracted: false,
+      });
+      return;
+    }
+    const presentation = presentationWithAnalyses(run.presentation, analyzed.outcomes);
+    const structured = await structureSlides(
+      presentation.slides,
+      analyzed.outcomes,
+      postProcessSlide,
+      (completed, total) => {
+        setFlow({
+          phase: "structuring",
+          filename: run.filename,
+          stages: stagesWhileStructuring(),
+          completed,
+          total,
+        });
+      },
+    );
+    if (structured.ok) {
+      setFlow({
+        phase: "review",
+        filename: run.filename,
+        stages: stagesAfterStructure(),
+        presentation,
+        warnings: run.warnings,
+        outcomes: analyzed.outcomes,
+        notes: structured.notes,
+      });
+      return;
+    }
+    setFlow({
+      phase: "review",
+      filename: run.filename,
+      stages: stagesAfterStructureStopped(),
+      presentation,
+      warnings: run.warnings,
+      outcomes: analyzed.outcomes,
+      notes: structured.notes,
+      structureMessage: structured.message,
+    });
   }
 
   if (flow.phase === "extracting") {
@@ -121,29 +171,25 @@ export function LectureFlow() {
     );
   }
 
-  if (flow.phase === "review") {
+  if (flow.phase === "structuring") {
+    const current = flow.total === 0 ? 0 : Math.min(flow.completed + 1, flow.total);
     return (
-      <div className="flex flex-col gap-12">
-        <ProcessingStatus
-          title={flow.analysisMessage ? "Slides extracted" : "Images analyzed"}
-          summary={
-            flow.analysisMessage
-              ? "Image analysis did not finish. Structuring and organization have not started."
-              : "Image analysis finished. Structuring and organization have not started."
-          }
-          stages={flow.stages}
-        />
-        {flow.analysisMessage ? (
-          <p role="alert" className="text-sm text-red-700 dark:text-red-300">
-            {flow.analysisMessage}
-          </p>
-        ) : null}
-        <ExtractionReview
-          presentation={flow.presentation}
-          warnings={flow.warnings}
-          outcomes={flow.outcomes}
-        />
-        <NotePreview />
+      <ProcessingStatus
+        title="Structuring slides"
+        summary={
+          flow.total === 0
+            ? `No slides were found in ${flow.filename}. Organization has not started.`
+            : `Structuring slide ${current} of ${flow.total} in ${flow.filename}. Organization has not started.`
+        }
+        stages={flow.stages}
+      />
+    );
+  }
+
+  if (flow.phase === "analyze-stopped") {
+    const stopped = flow;
+    return (
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <button
           type="button"
           className="self-start text-sm font-medium underline"
@@ -151,6 +197,68 @@ export function LectureFlow() {
         >
           Upload a different file
         </button>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">{stopped.filename}</h1>
+          <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-300">
+            {stopped.message}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              className={primaryButtonClass}
+              onClick={() => void analyzeAndStructure(stopped)}
+            >
+              Try again
+            </button>
+            {stopped.showExtracted ? null : (
+              <button
+                type="button"
+                className={secondaryButtonClass}
+                onClick={() => setFlow({ ...stopped, showExtracted: true })}
+              >
+                View extracted slides
+              </button>
+            )}
+          </div>
+        </div>
+        {stopped.showExtracted ? (
+          <SlideWorkspace presentation={stopped.presentation} outcomes={[]} />
+        ) : null}
+      </div>
+    );
+  }
+
+  if (flow.phase === "review") {
+    return (
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+        <button
+          type="button"
+          className="self-start text-sm font-medium underline"
+          onClick={() => setFlow({ phase: "idle" })}
+        >
+          Upload a different file
+        </button>
+        <ProcessingStatus compact stages={flow.stages} />
+        {flow.warnings.length > 0 ? (
+          <div>
+            <h2 className="text-sm font-medium">Warnings</h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-600 dark:text-zinc-400">
+              {flow.warnings.map((warning, index) => (
+                <li key={`${warning}-${index}`}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {flow.structureMessage ? (
+          <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+            {flow.structureMessage}
+          </p>
+        ) : null}
+        <SlideWorkspace
+          presentation={flow.presentation}
+          outcomes={flow.outcomes}
+          notes={flow.notes}
+        />
       </div>
     );
   }
@@ -165,6 +273,22 @@ export function LectureFlow() {
       ) : null}
     </div>
   );
+}
+
+const primaryButtonClass =
+  "rounded-full bg-zinc-900 px-4 py-2 text-sm font-medium text-white dark:bg-zinc-100 dark:text-zinc-900";
+
+const secondaryButtonClass =
+  "rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium dark:border-zinc-700";
+
+async function postProcessSlide(body: unknown): Promise<SlidePostResult> {
+  const response = await fetch("/api/process-slide", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const payload: unknown = await response.json();
+  return { ok: response.ok, payload };
 }
 
 async function requestImageAnalysis(

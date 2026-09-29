@@ -86,3 +86,43 @@ export function stagesAfterAnalyze(): StageState[] {
     status: stage.id === "parse" || stage.id === "analyze-images" ? "done" : "pending",
   }));
 }
+
+/** Image analysis finished. Structuring is in progress. Organize has not started. */
+export function stagesWhileStructuring(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail: stage.id === "organize" ? "Has not started." : stage.detail,
+    status:
+      stage.id === "parse" || stage.id === "analyze-images"
+        ? "done"
+        : stage.id === "process-slides"
+          ? "active"
+          : "pending",
+  }));
+}
+
+/** Every slide returned notes. Organize has not started. */
+export function stagesAfterStructure(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail: stage.id === "organize" ? "Has not started." : stage.detail,
+    status: stage.id === "organize" ? "pending" : "done",
+  }));
+}
+
+/** Structuring stopped before every slide returned. Organize has not started. */
+export function stagesAfterStructureStopped(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail:
+      stage.id === "organize"
+        ? "Has not started."
+        : stage.id === "process-slides"
+          ? "Stopped before every slide was structured."
+          : stage.detail,
+    status: stage.id === "parse" || stage.id === "analyze-images" ? "done" : "pending",
+  }));
+}

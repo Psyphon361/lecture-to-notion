@@ -1,5 +1,7 @@
+import type { ImageOutcome } from "@/lib/ai/analyze-response";
 import type { ImageAnalysis } from "@/lib/ai/schema";
 import type { NoteDocument, SlideNotes } from "@/lib/documents/schema";
+import type { Slide } from "@/lib/ppt/schema";
 
 export interface ImageInput {
   imageId: string;
@@ -8,14 +10,12 @@ export interface ImageInput {
   altText?: string;
 }
 
-/** Assembled per slide. Never the whole deck, and never Notion JSON. */
+/** One slide, its image outcomes, and the neighbor title or first line. Never image bytes. */
 export interface SlideContext {
-  slideNumber: number;
-  title?: string;
-  sourceText: string;
-  imageAnalyses: ImageAnalysis[];
-  previousSummary?: string;
-  nextSummary?: string;
+  slide: Slide;
+  outcomes: ImageOutcome[];
+  previousLine?: string;
+  nextLine?: string;
 }
 
 export interface AIProvider {

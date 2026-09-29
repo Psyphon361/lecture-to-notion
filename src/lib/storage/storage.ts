@@ -10,6 +10,10 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
+import { isRunId, parseImageKey, StorageError } from "@/lib/storage/image-key";
+
+export { imageAssetKey, parseImageKey, StorageError } from "@/lib/storage/image-key";
+
 export interface StoredAsset {
   key: string;
   contentType: string;
@@ -28,19 +32,8 @@ export interface Storage {
   delete(key: string): Promise<void>;
 }
 
-export class StorageError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "StorageError";
-  }
-}
-
 /** Local run directories older than this are eligible for `purgeExpiredRuns`. */
 export const LOCAL_ASSET_TTL_MS = 24 * 60 * 60 * 1000;
-
-const RUN_ID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const CONTENT_HASH = /^[0-9a-f]{64}$/;
 
 interface AssetMeta {
   contentType: string;
@@ -65,15 +58,6 @@ export function createRunId(): string {
 /** Lowercase sha256 hex. Image file names and the second key segment use this. */
 export function sha256Hex(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
-}
-
-/**
- * Storage key for one image. The run id is unguessable.
- * The object name is the content hash, so identical bytes in a run share one file.
- */
-export function imageAssetKey(runId: string, contentHash: string): string {
-  parseImageKey(`${runId}/${contentHash}`);
-  return `${runId}/${contentHash}`;
 }
 
 /** Project-local root. Already listed in `.gitignore`. */
@@ -179,7 +163,7 @@ export async function purgeExpiredRuns(
 
   let removed = 0;
   for (const name of names) {
-    if (!RUN_ID.test(name)) continue;
+    if (!isRunId(name)) continue;
     const dir = path.join(runsDir, name);
     let info;
     try {
@@ -198,23 +182,6 @@ export async function purgeExpiredRuns(
 
 function contentHashFromKey(key: string): string {
   return parseImageKey(key).contentHash;
-}
-
-function parseImageKey(key: string): { runId: string; contentHash: string } {
-  const slash = key.indexOf("/");
-  const runId = slash === -1 ? "" : key.slice(0, slash);
-  const contentHash = slash === -1 ? "" : key.slice(slash + 1);
-  if (
-    slash === -1 ||
-    key.indexOf("/", slash + 1) !== -1 ||
-    !RUN_ID.test(runId) ||
-    !CONTENT_HASH.test(contentHash)
-  ) {
-    throw new StorageError(
-      "Storage key must be an unguessable run id and a content hash.",
-    );
-  }
-  return { runId, contentHash };
 }
 
 function locate(root: string, key: string): LocatedAsset {

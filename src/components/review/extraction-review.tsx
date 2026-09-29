@@ -1,5 +1,6 @@
 import type { ImageOutcome } from "@/lib/ai/analyze-response";
 import type { ImageAnalysis } from "@/lib/ai/schema";
+import { StoredImage } from "@/components/assets/stored-image";
 import {
   elementsInReadingOrder,
   slideHeading,
@@ -8,59 +9,43 @@ import type { SlideElement, TextParagraph, Presentation } from "@/lib/ppt/schema
 
 export function ExtractionReview({
   presentation,
-  warnings,
   outcomes = [],
+  slideNumber,
 }: {
   presentation: Presentation;
-  warnings: string[];
   outcomes?: ImageOutcome[];
+  slideNumber: number;
 }) {
   const outcomeById = new Map(outcomes.map((outcome) => [outcome.imageId, outcome]));
+  const slide = presentation.slides.find((item) => item.slideNumber === slideNumber);
+  if (!slide) {
+    return <p className="text-sm text-zinc-500">This slide was not extracted.</p>;
+  }
   return (
-    <section className="mx-auto w-full max-w-3xl">
-      <h1 className="text-2xl font-semibold tracking-tight">What was extracted</h1>
-      <p className="mt-2 text-zinc-600 dark:text-zinc-400">
-        Slide number, title or first line, text, and image boxes in reading order. Use this to check that the file was read correctly.
-      </p>
-      {warnings.length > 0 ? (
-        <div className="mt-6">
-          <h2 className="text-sm font-medium">Warnings</h2>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-600 dark:text-zinc-400">
-            {warnings.map((warning, index) => (
-              <li key={`${warning}-${index}`}>{warning}</li>
-            ))}
-          </ul>
-        </div>
+    <section>
+      <h2 className="text-lg font-semibold">
+        Slide {slide.slideNumber}. {slideHeading(slide)}
+      </h2>
+      {slide.hidden ? <p className="mt-1 text-sm text-zinc-500">Hidden slide</p> : null}
+      {slide.speakerNotes ? (
+        <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+          <span className="font-medium text-zinc-800 dark:text-zinc-200">Speaker notes. </span>
+          {slide.speakerNotes}
+        </p>
       ) : null}
-      <ol className="mt-8 flex flex-col gap-8">
-        {presentation.slides.map((slide) => (
-          <li key={slide.slideNumber} className="border-t border-zinc-200 pt-6 dark:border-zinc-800">
-            <h2 className="text-lg font-semibold">
-              Slide {slide.slideNumber}. {slideHeading(slide)}
-            </h2>
-            {slide.hidden ? <p className="mt-1 text-sm text-zinc-500">Hidden slide</p> : null}
-            {slide.speakerNotes ? (
-              <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                <span className="font-medium text-zinc-800 dark:text-zinc-200">Speaker notes. </span>
-                {slide.speakerNotes}
-              </p>
-            ) : null}
-            <div className="mt-4 flex flex-col gap-3">
-              {slide.elements.length === 0 ? (
-                <p className="text-sm text-zinc-500">No text or images were extracted.</p>
-              ) : (
-                elementsInReadingOrder(slide.elements).map((element) => (
-                  <ElementView
-                    key={element.id}
-                    element={element}
-                    outcome={outcomeById.get(element.id)}
-                  />
-                ))
-              )}
-            </div>
-          </li>
-        ))}
-      </ol>
+      <div className="mt-4 flex flex-col gap-3">
+        {slide.elements.length === 0 ? (
+          <p className="text-sm text-zinc-500">No text or images were extracted.</p>
+        ) : (
+          elementsInReadingOrder(slide.elements).map((element) => (
+            <ElementView
+              key={element.id}
+              element={element}
+              outcome={outcomeById.get(element.id)}
+            />
+          ))
+        )}
+      </div>
     </section>
   );
 }
@@ -139,9 +124,11 @@ function ImageBox({
   const details = [element.mimeType, place, element.cropped ? "Cropped" : undefined].filter(
     (part): part is string => Boolean(part),
   );
+  const alt = element.altText || "Image";
   return (
     <div className="rounded-md border border-dashed border-zinc-300 px-3 py-3 dark:border-zinc-700">
-      <p className="font-medium">{element.altText || "Image"}</p>
+      <StoredImage assetId={element.assetId} alt={alt} />
+      <p className="mt-2 font-medium">{alt}</p>
       <p className="mt-1 text-sm text-zinc-500">{details.join(" · ")}</p>
       {outcome?.status === "skipped" ? (
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Skipped. {outcome.reason}</p>
