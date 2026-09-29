@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   advanceStages,
   initialStages,
+  stagesAfterExtract,
   stagesComplete,
 } from "@/lib/pipeline/stages";
 
@@ -26,5 +27,18 @@ describe("pipeline stages", () => {
     expect(steps).toBe(4);
     expect(stages.every((stage) => stage.status === "done")).toBe(true);
     expect(advanceStages(stages)).toEqual(stages);
+  });
+
+  it("marks extract done and leaves the later stages unstarted", () => {
+    const stages = stagesAfterExtract();
+    expect(stages.map((stage) => stage.status)).toEqual([
+      "done",
+      "pending",
+      "pending",
+      "pending",
+    ]);
+    expect(stages.slice(1).every((stage) => stage.detail === "Has not started.")).toBe(
+      true,
+    );
   });
 });

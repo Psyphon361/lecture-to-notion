@@ -2,7 +2,7 @@
 
 **Audience:** the coding/orchestrating agent working in `C:\dev\lecture-to-notes`.
 **Written:** Sep 29, 2026, at the end of the planning session in a different folder.
-**Status:** Phase 0 spike S1 complete (Sep 29, 2026). Phase 1 scaffold is in progress. S2 and S3 have not started.
+**Status:** Phase 1 gate met (Sep 29, 2026). Phase 2 extraction is in the app: `POST /api/parse` stores images and the review screen lists slides. Analyze, structure, and organize stay pending. S2 and S3 have not started.
 
 ## 0. How to use this document
 
@@ -75,12 +75,15 @@ These come from the brief and apply to every design and prompt decision.
 
 ## 4. Current state
 
-Updated Sep 29, 2026, at the Phase 1 review gate.
+Updated Sep 29, 2026. Phase 2 parse route and extraction review landed the same day.
 
 - Next.js 16.3.7 + React 19 + TypeScript + Tailwind 4 app. npm. Vitest. Zod 4 schemas for `Presentation`, `ImageAnalysis`, `SlideNotes`, and `NoteDocument`. `agentRules` is off so Next does not rewrite `AGENTS.md`.
 - Git is initialized. Nothing has been committed.
-- Phase 1 UI: PPTX validation (extension, 50 MB cap, ZIP magic bytes) on the client and `POST /api/upload`. The route does not store the file. Processing stages are the real stage list, advanced by a mock timer, then a fixture `NoteDocument` preview. Export to Notion is disabled.
-- `ts-pptx` is chosen and not yet installed. Extraction is Phase 2.
+- Phase 1 UI: PPTX validation (extension, 50 MB cap, ZIP magic bytes) on the client and `POST /api/upload`. The upload route does not store the file. Export to Notion is disabled.
+- `POST /api/parse` repeats those checks, parses, stores images, and returns `Presentation` JSON plus warnings. Image `assetId`s are storage keys. A malformed package returns a user-facing error. `purgeExpiredRuns` runs at the start of the request.
+- The upload screen calls `/api/parse` instead of the stage timer. "Extract slides" completes when that call returns. Analyze, structure, and organize stay pending and say they have not started. The review lists slide number, title or first line, text, and image boxes in reading order. The note preview stays the labeled fixture.
+- `ts-pptx@0.1.1` is installed. `src/lib/ppt/parse-pptx.ts` normalizes a PPTX into `Presentation`, sha256 image bytes (`contentHash`, also the image `assetId` until storage assigns a key), and warnings. Slide order follows `p:sldIdLst`.
+- Local storage (`createLocalStorage`) writes extracted images under `.data/runs/<runId>/<sha256>` (gitignored), with a `<sha256>.meta.json` sidecar for the content type. The run id comes from `createRunId()` (UUID). The storage key is `<runId>/<sha256>`, and `put` rejects a key whose hash does not match the bytes. `purgeExpiredRuns` deletes run directories older than 24 hours. Parse uses that key as the image `assetId`. The committed synthetic deck is `fixtures/synthetic.pptx` (rebuild with `node fixtures/synthetic-deck.mjs`).
 - **Sample PPTX:** `fixtures/private/sample.pptx` (946,979 bytes). Original: `C:\Users\TanishSharma\OneDrive - TrnDigital\Desktop\sample.pptx`. Never modify the original. `fixtures/private/` is gitignored.
   - S1 inspected it. 18 slides, 4:3, Marketing Management / consumer buying decision process (Ms. Shivani Kanaria, MIET School of Law). Two logo PNGs, three content PNGs, one background JPEG, one boilerplate notes part, one hyperlink, one lettered quiz list. No tables, groups, connectors, charts, SmartArt, equations, EMF/WMF, or hidden slides. Details: `docs/spikes/S1-parser.md`.
   - Whether it is Vasu's lecture is still unanswered.
@@ -395,7 +398,7 @@ Vercel Hobby: swap the storage implementation to Blob, set env vars, confirm `ma
 1. ~~Get the sample PPTX~~ **Done:** it is at `fixtures/private/sample.pptx`. Ask the user only whether it is Vasu's real lecture or a stand-in, and whether more decks are available.
 2. Ask the user to **confirm the Notion approach** ([ASSUMED] internal token first, OAuth later). Can wait until Phase 7, but note it.
 3. ~~Run Spike S1~~ **Done** (`docs/spikes/S1-parser.md`). S2 needs a Gemini key and consent. S3 needs a Notion token. Plans for both are at the bottom of the S1 note. Do not send the sample deck to either service yet.
-4. ~~Scaffold Phase 1~~ **At the review gate.** Next.js 16.3.7, npm, lint / typecheck / test. Waiting on the user before Phase 2.
+4. ~~Scaffold Phase 1~~ **Done.** Next.js 16.3.7, npm, lint / typecheck / test. Phase 2 parser, local image storage, `POST /api/parse`, and the extraction review are in place. Later stages stay pending. The note preview is still the fixture.
 5. ~~Shared types and Zod schemas~~ **Done** under `src/lib/`.
 
 ### Open items
@@ -409,6 +412,7 @@ Vercel Hobby: swap the storage implementation to Blob, set env vars, confirm `ma
 - [ ] Current Gemini model IDs and real free-tier limits (S2). Section 5.2 ids are still unverified
 - [x] Max upload size cap: 50 MB locally. Vercel 4.5 MB still applies to function bodies
 - [ ] Eval rubric and corpus (Section 10)
+- [ ] Table extraction against a real deck. The private sample has no tables, so that Phase 2 check is still open. A hand-built package in the parser tests covers a simple table; `fixtures/synthetic.pptx` does not.
 
 ### Known risks
 1. **PPTX complexity:** SmartArt, grouped shapes, EMF/WMF, equations, charts may be poorly handled by libraries. Mitigation: spike first; degrade gracefully and flag in warnings.

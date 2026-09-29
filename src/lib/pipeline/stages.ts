@@ -53,3 +53,13 @@ export function advanceStages(stages: StageState[]): StageState[] {
 export function stagesComplete(stages: StageState[]): boolean {
   return stages.every((stage) => stage.status === "done");
 }
+
+/** Extract finished. Later stages stay pending until their own requests exist. */
+export function stagesAfterExtract(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail: stage.id === "parse" ? stage.detail : "Has not started.",
+    status: stage.id === "parse" ? "done" : "pending",
+  }));
+}

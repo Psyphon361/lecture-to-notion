@@ -1,77 +1,86 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { NotePreview } from "@/components/preview/note-preview";
 import { ProcessingStatus } from "@/components/processing/processing-status";
+import { ExtractionReview } from "@/components/review/extraction-review";
 import { UploadDropzone } from "@/components/upload/upload-dropzone";
-import { advanceStages, initialStages, stagesComplete, type StageState } from "@/lib/pipeline/stages";
-import { uploadRejectionMessage, type UploadRejection } from "@/lib/upload/validate-pptx";
+import { parseFailureSchema, parseSuccessSchema } from "@/lib/ppt/parse-response";
+import type { Presentation } from "@/lib/ppt/schema";
+import { initialStages, stagesAfterExtract, type StageState } from "@/lib/pipeline/stages";
 
 type FlowState =
   | { phase: "idle" }
-  | { phase: "checking"; filename: string }
   | { phase: "rejected"; message: string }
-  | { phase: "processing"; filename: string; stages: StageState[] }
-  | { phase: "preview"; filename: string };
+  | { phase: "extracting"; filename: string; stages: StageState[] }
+  | {
+      phase: "review";
+      filename: string;
+      stages: StageState[];
+      presentation: Presentation;
+      warnings: string[];
+    };
 
 export function LectureFlow() {
   const [flow, setFlow] = useState<FlowState>({ phase: "idle" });
 
-  useEffect(() => {
-    if (flow.phase !== "processing") return;
-    const timer = window.setInterval(() => {
-      setFlow((current) => {
-        if (current.phase !== "processing") return current;
-        const stages = advanceStages(current.stages);
-        if (stagesComplete(stages)) {
-          return { phase: "preview", filename: current.filename };
-        }
-        return { ...current, stages };
-      });
-    }, 450);
-    return () => window.clearInterval(timer);
-  }, [flow.phase]);
-
   async function onAccepted(file: File) {
-    setFlow({ phase: "checking", filename: file.name });
+    setFlow({
+      phase: "extracting",
+      filename: file.name,
+      stages: initialStages(),
+    });
     try {
       const body = new FormData();
       body.set("file", file);
-      const response = await fetch("/api/upload", { method: "POST", body });
-      const payload = (await response.json()) as {
-        accepted?: boolean;
-        reason?: UploadRejection;
-        message?: string;
-      };
-      if (!response.ok || !payload.accepted) {
+      const response = await fetch("/api/parse", { method: "POST", body });
+      const payload: unknown = await response.json();
+      const success = parseSuccessSchema.safeParse(payload);
+      if (response.ok && success.success) {
         setFlow({
-          phase: "rejected",
-          message: payload.message ?? uploadRejectionMessage(payload.reason ?? "missing"),
+          phase: "review",
+          filename: success.data.presentation.filename,
+          stages: stagesAfterExtract(),
+          presentation: success.data.presentation,
+          warnings: success.data.warnings,
         });
         return;
       }
+      const failure = parseFailureSchema.safeParse(payload);
       setFlow({
-        phase: "processing",
-        filename: file.name,
-        stages: initialStages(),
+        phase: "rejected",
+        message: failure.success
+          ? failure.data.message
+          : "That PowerPoint file could not be read.",
       });
     } catch {
       setFlow({
         phase: "rejected",
-        message: "The file check could not be reached. Nothing was saved.",
+        message: "The PowerPoint could not be read. Try the file again.",
       });
     }
   }
 
-  if (flow.phase === "processing") {
-    return <ProcessingStatus filename={flow.filename} stages={flow.stages} />;
+  if (flow.phase === "extracting") {
+    return (
+      <ProcessingStatus
+        title="Extracting slides"
+        summary={`Reading text, images, and layout from ${flow.filename}.`}
+        stages={flow.stages}
+      />
+    );
   }
 
-  if (flow.phase === "preview") {
+  if (flow.phase === "review") {
     return (
-      <div className="flex flex-col gap-8">
-        <p className="text-sm text-zinc-500">Checked {flow.filename}. Extraction has not run.</p>
+      <div className="flex flex-col gap-12">
+        <ProcessingStatus
+          title="Slides extracted"
+          summary="Image analysis, structuring, and organization have not started."
+          stages={flow.stages}
+        />
+        <ExtractionReview presentation={flow.presentation} warnings={flow.warnings} />
         <NotePreview />
         <button
           type="button"
@@ -86,8 +95,7 @@ export function LectureFlow() {
 
   return (
     <div>
-      <UploadDropzone disabled={flow.phase === "checking"} onAccepted={(file) => void onAccepted(file)} />
-      {flow.phase === "checking" ? <p className="mt-4 text-center text-sm text-zinc-500">Checking the file…</p> : null}
+      <UploadDropzone onAccepted={(file) => void onAccepted(file)} />
       {flow.phase === "rejected" ? (
         <p role="alert" className="mt-4 text-center text-sm text-red-700 dark:text-red-300">
           {flow.message}
