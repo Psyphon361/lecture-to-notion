@@ -6,20 +6,36 @@ import { NotePreview } from "@/components/preview/note-preview";
 import { ProcessingStatus } from "@/components/processing/processing-status";
 import { ExtractionReview } from "@/components/review/extraction-review";
 import { UploadDropzone } from "@/components/upload/upload-dropzone";
+import {
+  analyzeFailureSchema,
+  analyzeSuccessSchema,
+  candidatesFromPresentation,
+  presentationWithAnalyses,
+  type ImageOutcome,
+} from "@/lib/ai/analyze-response";
 import { parseFailureSchema, parseSuccessSchema } from "@/lib/ppt/parse-response";
 import type { Presentation } from "@/lib/ppt/schema";
-import { initialStages, stagesAfterExtract, type StageState } from "@/lib/pipeline/stages";
+import {
+  initialStages,
+  stagesAfterAnalyze,
+  stagesAfterExtract,
+  stagesWhileAnalyzing,
+  type StageState,
+} from "@/lib/pipeline/stages";
 
 type FlowState =
   | { phase: "idle" }
   | { phase: "rejected"; message: string }
   | { phase: "extracting"; filename: string; stages: StageState[] }
+  | { phase: "analyzing"; filename: string; stages: StageState[] }
   | {
       phase: "review";
       filename: string;
       stages: StageState[];
       presentation: Presentation;
       warnings: string[];
+      outcomes: ImageOutcome[];
+      analysisMessage?: string;
     };
 
 export function LectureFlow() {
@@ -38,12 +54,35 @@ export function LectureFlow() {
       const payload: unknown = await response.json();
       const success = parseSuccessSchema.safeParse(payload);
       if (response.ok && success.success) {
+        const filename = success.data.presentation.filename;
+        setFlow({
+          phase: "analyzing",
+          filename,
+          stages: stagesWhileAnalyzing(),
+        });
+        const analyzed = await requestImageAnalysis(
+          success.data.runId,
+          success.data.presentation,
+        );
+        if (analyzed.ok) {
+          setFlow({
+            phase: "review",
+            filename,
+            stages: stagesAfterAnalyze(),
+            presentation: presentationWithAnalyses(success.data.presentation, analyzed.outcomes),
+            warnings: success.data.warnings,
+            outcomes: analyzed.outcomes,
+          });
+          return;
+        }
         setFlow({
           phase: "review",
-          filename: success.data.presentation.filename,
+          filename,
           stages: stagesAfterExtract(),
           presentation: success.data.presentation,
           warnings: success.data.warnings,
+          outcomes: [],
+          analysisMessage: analyzed.message,
         });
         return;
       }
@@ -72,15 +111,38 @@ export function LectureFlow() {
     );
   }
 
+  if (flow.phase === "analyzing") {
+    return (
+      <ProcessingStatus
+        title="Analyzing images"
+        summary={`Reading diagrams and screenshots in ${flow.filename}. Structuring and organization have not started.`}
+        stages={flow.stages}
+      />
+    );
+  }
+
   if (flow.phase === "review") {
     return (
       <div className="flex flex-col gap-12">
         <ProcessingStatus
-          title="Slides extracted"
-          summary="Image analysis, structuring, and organization have not started."
+          title={flow.analysisMessage ? "Slides extracted" : "Images analyzed"}
+          summary={
+            flow.analysisMessage
+              ? "Image analysis did not finish. Structuring and organization have not started."
+              : "Image analysis finished. Structuring and organization have not started."
+          }
           stages={flow.stages}
         />
-        <ExtractionReview presentation={flow.presentation} warnings={flow.warnings} />
+        {flow.analysisMessage ? (
+          <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+            {flow.analysisMessage}
+          </p>
+        ) : null}
+        <ExtractionReview
+          presentation={flow.presentation}
+          warnings={flow.warnings}
+          outcomes={flow.outcomes}
+        />
         <NotePreview />
         <button
           type="button"
@@ -103,4 +165,32 @@ export function LectureFlow() {
       ) : null}
     </div>
   );
+}
+
+async function requestImageAnalysis(
+  runId: string,
+  presentation: Presentation,
+): Promise<{ ok: true; outcomes: ImageOutcome[] } | { ok: false; message: string }> {
+  try {
+    const response = await fetch("/api/analyze-images", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        runId,
+        images: candidatesFromPresentation(presentation),
+      }),
+    });
+    const payload: unknown = await response.json();
+    const success = analyzeSuccessSchema.safeParse(payload);
+    if (response.ok && success.success) {
+      return { ok: true, outcomes: success.data.outcomes };
+    }
+    const failure = analyzeFailureSchema.safeParse(payload);
+    return {
+      ok: false,
+      message: failure.success ? failure.data.message : "Image analysis failed. Try again.",
+    };
+  } catch {
+    return { ok: false, message: "Image analysis failed. Try the file again." };
+  }
 }

@@ -63,3 +63,26 @@ export function stagesAfterExtract(): StageState[] {
     status: stage.id === "parse" ? "done" : "pending",
   }));
 }
+
+/** Extract finished and image analysis is in progress. Later stages have not started. */
+export function stagesWhileAnalyzing(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail:
+      stage.id === "parse" || stage.id === "analyze-images" ? stage.detail : "Has not started.",
+    status:
+      stage.id === "parse" ? "done" : stage.id === "analyze-images" ? "active" : "pending",
+  }));
+}
+
+/** Extract and image analysis finished. Structure and organize have not started. */
+export function stagesAfterAnalyze(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail:
+      stage.id === "process-slides" || stage.id === "organize" ? "Has not started." : stage.detail,
+    status: stage.id === "parse" || stage.id === "analyze-images" ? "done" : "pending",
+  }));
+}

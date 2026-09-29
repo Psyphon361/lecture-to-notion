@@ -2,7 +2,7 @@
 
 **Audience:** the coding/orchestrating agent working in `C:\dev\lecture-to-notes`.
 **Written:** Sep 29, 2026, at the end of the planning session in a different folder.
-**Status:** Phase 1 gate met (Sep 29, 2026). Phase 2 extraction is in the app: `POST /api/parse` stores images and the review screen lists slides. Analyze, structure, and organize stay pending. S2 and S3 have not started.
+**Status:** Phase 1 gate met (Sep 29, 2026). Phase 2 extraction is in the app. Phase 3 image analysis is in the app: `POST /api/analyze-images` skips decorative images and reads the rest with Gemini. Structure and organize have not started. S2 ran on a synthetic image (`docs/spikes/S2-gemini.md`). S3 has not started.
 
 ## 0. How to use this document
 
@@ -81,14 +81,17 @@ Updated Sep 29, 2026. Phase 2 parse route and extraction review landed the same 
 - Git is initialized. Nothing has been committed.
 - Phase 1 UI: PPTX validation (extension, 50 MB cap, ZIP magic bytes) on the client and `POST /api/upload`. The upload route does not store the file. Export to Notion is disabled.
 - `POST /api/parse` repeats those checks, parses, stores images, and returns `Presentation` JSON plus warnings. Image `assetId`s are storage keys. A malformed package returns a user-facing error. `purgeExpiredRuns` runs at the start of the request.
-- The upload screen calls `/api/parse` instead of the stage timer. "Extract slides" completes when that call returns. Analyze, structure, and organize stay pending and say they have not started. The review lists slide number, title or first line, text, and image boxes in reading order. The note preview stays the labeled fixture.
+- The upload screen calls `/api/parse`, then `/api/analyze-images`. "Extract slides" completes when parse returns. "Analyze images" completes when the analyze call returns. Structure and organize stay pending and say they have not started. The review lists slide number, title or first line, text, and image boxes in reading order. Each image box shows a skip reason or the analysis. Interpretation is labeled as interpretation, and relationships are labeled as model output. The note preview stays the labeled fixture.
+- Image analysis uses `gemini-3.5-flash-lite` unless `GEMINI_MODEL` is set. Confirmed Sep 29, 2026 from the models page (updated 2026-09-24) and the pricing page: that id has a free tier, and new projects are pointed at 3.5 Flash-Lite or 3.8 Flash. `gemini-3.8-flash` returned 503 high demand on the synthetic image the same day. The key stays in `.env.local` as `GEMINI_API_KEY`.
+- Consent (Sep 29, 2026): Vasu's lecture may be sent to the Gemini free tier, where Google may use the content to improve its products.
 - `ts-pptx@0.1.1` is installed. `src/lib/ppt/parse-pptx.ts` normalizes a PPTX into `Presentation`, sha256 image bytes (`contentHash`, also the image `assetId` until storage assigns a key), and warnings. Slide order follows `p:sldIdLst`.
 - Local storage (`createLocalStorage`) writes extracted images under `.data/runs/<runId>/<sha256>` (gitignored), with a `<sha256>.meta.json` sidecar for the content type. The run id comes from `createRunId()` (UUID). The storage key is `<runId>/<sha256>`, and `put` rejects a key whose hash does not match the bytes. `purgeExpiredRuns` deletes run directories older than 24 hours. Parse uses that key as the image `assetId`. The committed synthetic deck is `fixtures/synthetic.pptx` (rebuild with `node fixtures/synthetic-deck.mjs`).
 - **Sample PPTX:** `fixtures/private/sample.pptx` (946,979 bytes). Original: `C:\Users\TanishSharma\OneDrive - TrnDigital\Desktop\sample.pptx`. Never modify the original. `fixtures/private/` is gitignored.
   - S1 inspected it. 18 slides, 4:3, Marketing Management / consumer buying decision process (Ms. Shivani Kanaria, MIET School of Law). Two logo PNGs, three content PNGs, one background JPEG, one boilerplate notes part, one hyperlink, one lettered quiz list. No tables, groups, connectors, charts, SmartArt, equations, EMF/WMF, or hidden slides. Details: `docs/spikes/S1-parser.md`.
   - Whether it is Vasu's lecture is still unanswered.
   - At about 0.9 MB it does not exercise the large-upload path.
-- No Gemini API key. No Notion integration. No `.env.local`. `.env.example` lists the later keys.
+- **Private corpus (Sep 29, 2026):** counted in `docs/spikes/corpus.md`. Five unique picture decks are one PNG per slide and have no native text. `child-conflict-need-meaning.pptx` is 35 slides with 2 tables and a notes part on every slide; parser cell text and speaker notes match the package. `Juvenile_Justice_and_ChildRights.pptx` is a byte-for-byte duplicate of `Juvenile_Justice_and_Child_Rights.pptx`. `Juvenile_Justice_and_Child_Rights.pptx.pdf` is not a deck. Parsed in-process only.
+- No Notion integration. `.env.local` holds `GEMINI_API_KEY` and is gitignored. `.env.example` lists the later keys.
 
 ---
 
@@ -102,7 +105,7 @@ Updated Sep 29, 2026. Phase 2 parse route and extraction review landed the same 
 - Design consequence: (a) upload direct to storage; (b) client-driven short steps so no request is long; (c) no reliance on in-memory state between requests (serverless instances are not sticky).
 
 ### 5.2 Gemini API (free tier)
-- Free-tier models exist among the Flash family (docs listed `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`). Pro-tier models mostly had no free tier. **Confirm current IDs and free-tier status in the docs and AI Studio before coding.**
+- Free-tier models exist among the Flash family. Rechecked Sep 29, 2026: the models page (updated 2026-09-24) lists `gemini-3.8-flash` as the current stable Flash and tells new projects to use `gemini-3.5-flash-lite` or `gemini-3.8-flash`. The pricing page lists a free tier for both. The app default is `gemini-3.5-flash-lite` because `gemini-3.8-flash` returned 503 high demand during S2. Override with `GEMINI_MODEL`.
 - Structured output: `response_format` with a JSON Schema (subset of JSON Schema). Supported on current Flash/Pro models. Keep schemas small and shallow; the API can reject large or deeply nested schemas, and unsupported keywords are ignored.
 - Image and other multimodal input count against the same rate limits as text.
 - **Rate limits (RPM/TPM/RPD) are only shown in Google AI Studio for the specific project.** Not a single documented number. Measure with a full-lecture run.
@@ -376,7 +379,7 @@ Vercel Hobby: swap the storage implementation to Blob, set env vars, confirm `ma
 - Validate uploads server-side: extension and magic bytes (PPTX is a ZIP), size cap, zip-bomb/decompression limits (cap total uncompressed size and entry count), path traversal in entry names, and sanitize filenames.
 - Secrets (`GEMINI_API_KEY`, `NOTION_TOKEN`) only in `.env.local` (gitignored) and never sent to the client. Provide `.env.example`.
 - Run ids must be unguessable; temp files and stored assets get a TTL and cleanup.
-- **Privacy:** lecture content goes to Google (Gemini) and, on export, to Notion. On the Gemini **free tier** it may be used to improve Google products. Get Vasu's explicit OK before processing his slides; record that decision here. Don't log full slide content to shared/third-party logs.
+- **Privacy:** lecture content goes to Google (Gemini) and, on export, to Notion. On the Gemini **free tier** it may be used to improve Google products. Consent for free-tier processing of Vasu's lecture was given Sep 29, 2026, and is recorded in Section 4. Don't log full slide content to shared/third-party logs.
 - Optional later: a switch to a paid Gemini key for no-training processing.
 
 ---
@@ -395,24 +398,25 @@ Vercel Hobby: swap the storage implementation to Blob, set env vars, confirm `ma
 ## 13. Open items and immediate first actions
 
 ### First actions, in order
-1. ~~Get the sample PPTX~~ **Done:** it is at `fixtures/private/sample.pptx`. Ask the user only whether it is Vasu's real lecture or a stand-in, and whether more decks are available.
+1. ~~Get the sample PPTX~~ **Done:** it is at `fixtures/private/sample.pptx`. More decks are counted in `docs/spikes/corpus.md`. Ask the user only whether the sample is Vasu's real lecture or a stand-in.
 2. Ask the user to **confirm the Notion approach** ([ASSUMED] internal token first, OAuth later). Can wait until Phase 7, but note it.
-3. ~~Run Spike S1~~ **Done** (`docs/spikes/S1-parser.md`). S2 needs a Gemini key and consent. S3 needs a Notion token. Plans for both are at the bottom of the S1 note. Do not send the sample deck to either service yet.
-4. ~~Scaffold Phase 1~~ **Done.** Next.js 16.3.7, npm, lint / typecheck / test. Phase 2 parser, local image storage, `POST /api/parse`, and the extraction review are in place. Later stages stay pending. The note preview is still the fixture.
+3. ~~Run Spike S1~~ **Done** (`docs/spikes/S1-parser.md`). ~~S2~~ **Done** on a synthetic PNG only (`docs/spikes/S2-gemini.md`). S3 needs a Notion token. Do not send a lecture deck to Notion yet. The sample deck may go to Gemini only because consent was given Sep 29, 2026.
+4. ~~Scaffold Phase 1~~ **Done.** Next.js 16.3.7, npm, lint / typecheck / test. Phase 2 parser, local image storage, `POST /api/parse`, and the extraction review are in place. Phase 3 image analysis is in place. Slide processing and organization have not started. The note preview is still the fixture.
 5. ~~Shared types and Zod schemas~~ **Done** under `src/lib/`.
 
 ### Open items
 - [x] Sample PPTX path (received; `fixtures/private/sample.pptx`)
-- [ ] Is the sample Vasu's real lecture? Are more decks available (especially a larger, image-heavy one)?
-- [ ] Gemini API key (from Google AI Studio; needed for S2/Phase 3)
-- [ ] Vasu's explicit consent for free-tier data use
+- [ ] Is the sample Vasu's real lecture?
+- [x] More decks are in `fixtures/private/`, including larger image-heavy ones. Counts: `docs/spikes/corpus.md`
+- [x] Gemini API key (in `.env.local` as `GEMINI_API_KEY`; not committed)
+- [x] Vasu's explicit consent for free-tier data use (Sep 29, 2026)
 - [ ] Notion approach confirmation
 - [ ] Notion integration created and a target parent page shared with it (Phase 7)
 - [x] Parser spike result (S1): `ts-pptx@0.1.1` plus our normalizer. Hard OOXML cases were not in the sample
-- [ ] Current Gemini model IDs and real free-tier limits (S2). Section 5.2 ids are still unverified
+- [x] Current Gemini model id for this app: `gemini-3.5-flash-lite` (free tier). `gemini-3.8-flash` is the newer stable Flash and was returning 503 high demand on Sep 29, 2026. Rate limits are still project-specific and unmeasured for a full lecture
 - [x] Max upload size cap: 50 MB locally. Vercel 4.5 MB still applies to function bodies
 - [ ] Eval rubric and corpus (Section 10)
-- [ ] Table extraction against a real deck. The private sample has no tables, so that Phase 2 check is still open. A hand-built package in the parser tests covers a simple table; `fixtures/synthetic.pptx` does not.
+- [x] Table extraction against a real deck (Sep 29, 2026). `child-conflict-need-meaning.pptx` has 35 slides and 2 tables. Parser cell text matches the package, and speaker notes are kept on each slide that has a notes part. Counts: `docs/spikes/corpus.md`. The private sample and the picture-only decks have no tables. A hand-built package in the parser tests still covers a simple table; `fixtures/synthetic.pptx` does not.
 
 ### Known risks
 1. **PPTX complexity:** SmartArt, grouped shapes, EMF/WMF, equations, charts may be poorly handled by libraries. Mitigation: spike first; degrade gracefully and flag in warnings.

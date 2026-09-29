@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   advanceStages,
   initialStages,
+  stagesAfterAnalyze,
   stagesAfterExtract,
   stagesComplete,
+  stagesWhileAnalyzing,
 } from "@/lib/pipeline/stages";
 
 describe("pipeline stages", () => {
@@ -40,5 +42,20 @@ describe("pipeline stages", () => {
     expect(stages.slice(1).every((stage) => stage.detail === "Has not started.")).toBe(
       true,
     );
+  });
+
+  it("keeps structure and organize unstarted after image analysis", () => {
+    const analyzing = stagesWhileAnalyzing();
+    expect(analyzing.map((stage) => stage.status)).toEqual([
+      "done",
+      "active",
+      "pending",
+      "pending",
+    ]);
+    expect(analyzing.slice(2).every((stage) => stage.detail === "Has not started.")).toBe(true);
+
+    const done = stagesAfterAnalyze();
+    expect(done.map((stage) => stage.status)).toEqual(["done", "done", "pending", "pending"]);
+    expect(done.slice(2).every((stage) => stage.detail === "Has not started.")).toBe(true);
   });
 });

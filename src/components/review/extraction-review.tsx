@@ -1,3 +1,5 @@
+import type { ImageOutcome } from "@/lib/ai/analyze-response";
+import type { ImageAnalysis } from "@/lib/ai/schema";
 import {
   elementsInReadingOrder,
   slideHeading,
@@ -7,10 +9,13 @@ import type { SlideElement, TextParagraph, Presentation } from "@/lib/ppt/schema
 export function ExtractionReview({
   presentation,
   warnings,
+  outcomes = [],
 }: {
   presentation: Presentation;
   warnings: string[];
+  outcomes?: ImageOutcome[];
 }) {
+  const outcomeById = new Map(outcomes.map((outcome) => [outcome.imageId, outcome]));
   return (
     <section className="mx-auto w-full max-w-3xl">
       <h1 className="text-2xl font-semibold tracking-tight">What was extracted</h1>
@@ -45,7 +50,11 @@ export function ExtractionReview({
                 <p className="text-sm text-zinc-500">No text or images were extracted.</p>
               ) : (
                 elementsInReadingOrder(slide.elements).map((element) => (
-                  <ElementView key={element.id} element={element} />
+                  <ElementView
+                    key={element.id}
+                    element={element}
+                    outcome={outcomeById.get(element.id)}
+                  />
                 ))
               )}
             </div>
@@ -56,12 +65,18 @@ export function ExtractionReview({
   );
 }
 
-function ElementView({ element }: { element: SlideElement }) {
+function ElementView({
+  element,
+  outcome,
+}: {
+  element: SlideElement;
+  outcome?: ImageOutcome;
+}) {
   switch (element.type) {
     case "text":
       return <TextBlock paragraphs={element.paragraphs} />;
     case "image":
-      return <ImageBox element={element} />;
+      return <ImageBox element={element} outcome={outcome} />;
     case "table":
       return <TableBox rows={element.rows} />;
     case "shape":
@@ -115,8 +130,10 @@ function withMarkers(paragraphs: TextParagraph[]): { paragraph: TextParagraph; m
 
 function ImageBox({
   element,
+  outcome,
 }: {
   element: Extract<SlideElement, { type: "image" }>;
+  outcome?: ImageOutcome;
 }) {
   const place = boxLabel(element);
   const details = [element.mimeType, place, element.cropped ? "Cropped" : undefined].filter(
@@ -126,6 +143,60 @@ function ImageBox({
     <div className="rounded-md border border-dashed border-zinc-300 px-3 py-3 dark:border-zinc-700">
       <p className="font-medium">{element.altText || "Image"}</p>
       <p className="mt-1 text-sm text-zinc-500">{details.join(" · ")}</p>
+      {outcome?.status === "skipped" ? (
+        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Skipped. {outcome.reason}</p>
+      ) : null}
+      {outcome?.status === "unanalyzed" ? (
+        <p role="status" className="mt-2 text-sm text-red-700 dark:text-red-300">
+          This image was not analyzed. {outcome.warning}
+        </p>
+      ) : null}
+      {outcome?.status === "analyzed" ? <AnalysisBody analysis={outcome.analysis} /> : null}
+    </div>
+  );
+}
+
+function AnalysisBody({ analysis }: { analysis: ImageAnalysis }) {
+  return (
+    <div className="mt-3 flex flex-col gap-2 text-sm leading-6">
+      <p>
+        {analysis.containsUsefulInformation
+          ? "Contains lecture content."
+          : "No lecture content found."}
+        {analysis.kind ? ` Kind: ${analysis.kind}.` : ""}
+      </p>
+      {analysis.extractedText ? (
+        <p className="whitespace-pre-wrap break-words">
+          <span className="font-medium">Text in the image. </span>
+          {analysis.extractedText}
+        </p>
+      ) : null}
+      {analysis.description ? (
+        <p className="whitespace-pre-wrap break-words">
+          <span className="font-medium">Interpretation. </span>
+          {analysis.description}
+        </p>
+      ) : null}
+      {analysis.relationships && analysis.relationships.length > 0 ? (
+        <div>
+          <p className="font-medium">Model output</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
+            {analysis.relationships.map((relationship, index) => (
+              <li key={`${relationship}-${index}`}>{relationship}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {analysis.uncertainties && analysis.uncertainties.length > 0 ? (
+        <div>
+          <p className="font-medium">Uncertainties</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5 text-zinc-600 dark:text-zinc-400">
+            {analysis.uncertainties.map((uncertainty, index) => (
+              <li key={`${uncertainty}-${index}`}>{uncertainty}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
