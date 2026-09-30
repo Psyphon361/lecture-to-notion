@@ -97,14 +97,14 @@ describe("lecture flow", () => {
     expect(textButton(container, "View extracted slides")).toBeTruthy();
     expect(container.textContent).not.toContain("Export to Notion");
     expect(container.textContent).not.toContain("Structuring has not started.");
-    expect(container.textContent).not.toContain("1 of 2");
+    expect(container.textContent).not.toContain("1 / 2");
     expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeNull();
     expect(container.querySelector("[aria-label='Slides']")).toBeNull();
     expect(container.querySelector("button[aria-label='Previous slide']")).toBeNull();
     expect(calls.some((call) => call.url.endsWith("/api/organize"))).toBe(false);
 
     await clickText(container, "View extracted slides");
-    expect(container.textContent).toContain("1 of 2");
+    expect(container.textContent).toContain("1 / 2");
     expect(container.textContent).toContain("Body 1");
     expect(container.textContent).not.toContain("Note 1");
     expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeNull();
@@ -112,18 +112,18 @@ describe("lecture flow", () => {
     expect(container.querySelector("[aria-label='Slides']")).toBeNull();
 
     await clickText(container, "Try again");
-    expect(container.textContent).toContain("Body 1");
-    expect(container.textContent).toContain("Body 2");
-    expect(container.textContent).toContain("Slide 1");
-    expect(container.textContent).toContain("Slide 2");
-    expect(container.querySelector("a[href='#note-section-0']")).toBeTruthy();
-    expect(container.querySelector("a[href='#note-section-1']")).toBeTruthy();
-    expect(container.textContent).not.toContain("1 of 2");
+    const active = container.querySelector("[data-deck-section][data-active='true']");
+    expect(active?.textContent).toContain("Body 1");
+    expect(active?.textContent).not.toContain("Body 2");
+    expect(container.querySelector("h2")?.textContent ?? "").not.toMatch(/^Slide \d+/);
+    expect(container.querySelector("a[href='#note-section-0']")).toBeNull();
+    expect(container.querySelector("a[href='#note-section-1']")).toBeNull();
+    expect(container.textContent).toContain("1 / 2");
     expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeTruthy();
     expect(container.textContent).not.toContain("Export to Notion");
 
     await clickText(container, "Extracted");
-    expect(container.textContent).toContain("1 of 2");
+    expect(container.textContent).toContain("1 / 2");
     expect(container.textContent).toContain("Body 1");
 
     const parses = calls.filter((call) => call.url.endsWith("/api/parse"));
@@ -153,11 +153,14 @@ describe("lecture flow", () => {
     const container = await render(<LectureFlow />);
     await chooseFile(container);
 
-    expect(container.textContent).toContain("Body 1");
-    expect(container.textContent).toContain("Body 2");
+    const active = container.querySelector("[data-deck-section][data-active='true']");
+    expect(active?.textContent).toContain("Body 1");
+    expect(active?.textContent).not.toContain("Body 2");
+    expect(container.querySelector("h2")).toBeNull();
     expect(container.textContent).toContain("lecture.pptx");
-    expect(container.querySelector("a[href='#note-section-0']")?.textContent).toBe("Slide 1");
-    expect(container.querySelector("a[href='#note-section-1']")?.textContent).toBe("Slide 2");
+    expect(container.textContent).toContain("1 / 2");
+    expect(container.querySelector("a[href='#note-section-0']")).toBeNull();
+    expect(container.querySelector("nav")).toBeNull();
     expect(container.textContent).not.toContain("rate limiting");
     expect(container.textContent).toContain("Organization is done.");
     expect(calls.filter((url) => url.endsWith("/api/organize"))).toHaveLength(0);

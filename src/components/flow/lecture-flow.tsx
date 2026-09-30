@@ -204,7 +204,7 @@ export function LectureFlow() {
 
   if (flow.phase === "review") {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+      <div className="mx-auto flex h-[calc(100dvh-12.5rem)] w-full max-w-3xl flex-col gap-4 overflow-hidden">
         <button
           type="button"
           className="self-start text-sm font-medium underline"

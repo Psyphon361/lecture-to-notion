@@ -32,7 +32,7 @@ describe("slide workspace", () => {
   it("moves one slide at a time and clamps at the ends", async () => {
     const container = await renderWorkspace(3);
 
-    expect(position(container)).toBe("1 of 3");
+    expect(position(container)).toBe("1 / 3");
     expect(container.querySelector("[aria-label='Slides']")).toBeNull();
     expect(container.textContent).toContain("Note 1");
     expect(container.textContent).not.toContain("Note 2");
@@ -42,29 +42,29 @@ describe("slide workspace", () => {
     expect(button(container, "Next slide").disabled).toBe(false);
 
     await click(container, "Next slide");
-    expect(position(container)).toBe("2 of 3");
+    expect(position(container)).toBe("2 / 3");
     expect(container.textContent).toContain("Note 2");
     expect(container.textContent).not.toContain("Note 1");
 
     await click(container, "Next slide");
-    expect(position(container)).toBe("3 of 3");
+    expect(position(container)).toBe("3 / 3");
     expect(button(container, "Next slide").disabled).toBe(true);
 
     await click(container, "Next slide");
-    expect(position(container)).toBe("3 of 3");
+    expect(position(container)).toBe("3 / 3");
 
     await click(container, "Previous slide");
     await click(container, "Previous slide");
-    expect(position(container)).toBe("1 of 3");
+    expect(position(container)).toBe("1 / 3");
     expect(button(container, "Previous slide").disabled).toBe(true);
 
     await click(container, "Previous slide");
-    expect(position(container)).toBe("1 of 3");
+    expect(position(container)).toBe("1 / 3");
   });
 
   it("disables previous and next on a one-slide deck", async () => {
     const container = await renderWorkspace(1);
-    expect(position(container)).toBe("1 of 1");
+    expect(position(container)).toBe("1 / 1");
     expect(button(container, "Previous slide").disabled).toBe(true);
     expect(button(container, "Next slide").disabled).toBe(true);
   });
@@ -73,7 +73,7 @@ describe("slide workspace", () => {
     const container = await render(
       <SlideWorkspace presentation={deck(3)} outcomes={[]} />,
     );
-    expect(position(container)).toBe("1 of 3");
+    expect(position(container)).toBe("1 / 3");
     expect(container.textContent).toContain("Body 1");
     expect(container.textContent).not.toContain("Body 2");
     expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeNull();
@@ -82,7 +82,7 @@ describe("slide workspace", () => {
     expect(container.querySelector("[aria-label='Slides']")).toBeNull();
 
     await click(container, "Next slide");
-    expect(position(container)).toBe("2 of 3");
+    expect(position(container)).toBe("2 / 3");
     expect(container.textContent).toContain("Body 2");
     expect(container.textContent).not.toContain("Body 1");
   });
@@ -101,7 +101,7 @@ describe("slide workspace", () => {
     expect(container.textContent).not.toContain("Note 2");
 
     await click(container, "Next slide");
-    expect(position(container)).toBe("2 of 3");
+    expect(position(container)).toBe("2 / 3");
     expect(container.textContent).toContain("Body 2");
     expect(container.textContent).not.toContain("Body 1");
   });
@@ -115,23 +115,23 @@ describe("slide workspace", () => {
     await act(async () => {
       input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     });
-    expect(position(container)).toBe("1 of 3");
+    expect(position(container)).toBe("1 / 3");
 
     input.blur();
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     });
-    expect(position(container)).toBe("2 of 3");
+    expect(position(container)).toBe("2 / 3");
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
     });
-    expect(position(container)).toBe("1 of 3");
+    expect(position(container)).toBe("1 / 3");
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
     });
-    expect(position(container)).toBe("1 of 3");
+    expect(position(container)).toBe("1 / 3");
   });
 });
 
@@ -174,21 +174,37 @@ describe("review status", () => {
       />,
     );
 
-    expect(container.textContent).toContain("Lecture notes");
-    expect(container.textContent).toContain("Opening");
-    expect(container.textContent).toContain("Closing");
-    expect(container.textContent).toContain("Note 1");
-    expect(container.textContent).toContain("Note 2");
-    expect(container.querySelector("a[href='#note-section-0']")?.textContent).toBe("Opening");
-    expect(container.querySelector("a[href='#note-section-1']")?.textContent).toBe("Closing");
-    expect(container.textContent).not.toContain("1 of 2");
-    expect(container.querySelector("button[aria-label='Previous slide']")).toBeNull();
+    expect(container.textContent).toContain("lecture.pptx");
+    expect(container.textContent).not.toContain("Lecture notes");
+    expect(container.querySelector("a[href='#note-section-0']")).toBeNull();
+    expect(container.querySelectorAll("[data-deck-section][data-active='true']")).toHaveLength(1);
+    expect(activeSection(container).textContent).toContain("Opening");
+    expect(activeSection(container).textContent).toContain("Note 1");
+    expect(activeSection(container).textContent).not.toContain("Note 2");
+    expect(position(container)).toBe("1 / 2");
+    expect(button(container, "Previous slide").disabled).toBe(true);
 
-    await click(container, "Slide 1 extracted");
-    expect(position(container)).toBe("1 of 2");
-    expect(container.textContent).toContain("Body 1");
-    expect(container.textContent).not.toContain("Body 2");
+    await click(container, "Next slide");
+    expect(position(container)).toBe("2 / 2");
+    expect(activeSection(container).textContent).toContain("Closing");
+    expect(activeSection(container).textContent).toContain("Note 2");
+    expect(activeSection(container).textContent).not.toContain("Note 1");
+
+    await click(container, "Slide 2 extracted");
+    expect(position(container)).toBe("2 / 2");
+    expect(container.textContent).toContain("Body 2");
+    expect(container.textContent).not.toContain("Body 1");
     expect(container.textContent).not.toContain("Opening");
+
+    await click(container, "Slide 2 notes");
+    expect(position(container)).toBe("2 / 2");
+    expect(activeSection(container).textContent).toContain("Note 2");
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    });
+    expect(position(container)).toBe("1 / 2");
+    expect(activeSection(container).textContent).toContain("Note 1");
   });
 
   it("keeps the full stage list on a processing screen", async () => {
@@ -226,8 +242,14 @@ async function render(node: ReactNode): Promise<HTMLDivElement> {
 }
 
 function position(container: ParentNode): string {
-  const match = container.textContent?.match(/\d+ of \d+/);
+  const match = container.textContent?.match(/\d+ \/ \d+/);
   return match?.[0] ?? "";
+}
+
+function activeSection(container: ParentNode): HTMLElement {
+  const found = container.querySelector<HTMLElement>("[data-deck-section][data-active='true']");
+  if (!found) throw new Error("Missing active section");
+  return found;
 }
 
 function button(container: ParentNode, label: string): HTMLButtonElement {
