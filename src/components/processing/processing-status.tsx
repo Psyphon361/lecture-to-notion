@@ -4,7 +4,11 @@ import type { StageState } from "@/lib/pipeline/stages";
 export function reviewStageLine(stages: StageState[]): string {
   const organize = stages.find((stage) => stage.id === "organize");
   const tail =
-    organize?.status === "done" ? "Organization is done." : "Organization has not started.";
+    organize?.status === "done"
+      ? "Organization is done."
+      : organize?.detail === "Organization failed."
+        ? "Organization failed."
+        : "Organization has not started.";
   const structure = stages.find((stage) => stage.id === "process-slides");
   if (structure?.status === "done") return `Structured. ${tail}`;
   if (structure?.detail === "Stopped before every slide was structured.") {

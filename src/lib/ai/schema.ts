@@ -120,6 +120,79 @@ export function slideNotesRequestJsonSchema(): Record<string, unknown> {
   return stripSchemaKeywords(slideNotesModelSchema.toJSONSchema());
 }
 
+const noteDocumentBlockModelSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("paragraph"),
+    content: z.string(),
+    provenance: blockProvenanceSchema,
+  }),
+  z.object({
+    type: z.literal("bullets"),
+    items: z.array(listItemModelSchema),
+    provenance: blockProvenanceSchema,
+  }),
+  z.object({
+    type: z.literal("numbered"),
+    items: z.array(listItemModelSchema),
+    provenance: blockProvenanceSchema,
+  }),
+  z.object({
+    type: z.literal("code"),
+    language: z.string().optional(),
+    content: z.string(),
+    provenance: blockProvenanceSchema,
+  }),
+  z.object({
+    type: z.literal("table"),
+    rows: z.array(z.array(z.string())),
+    header: z.boolean().optional(),
+    provenance: blockProvenanceSchema,
+  }),
+  z.object({
+    type: z.literal("image"),
+    assetId: z.string().describe("The image id from the slide notes. Do not invent one."),
+    caption: z.string().optional(),
+    alt: z.string().optional(),
+    provenance: blockProvenanceSchema,
+  }),
+  z.object({
+    type: z.literal("divider"),
+    provenance: blockProvenanceSchema,
+  }),
+]);
+
+/**
+ * Shallow document shape for Gemini. List items are text only.
+ * No `.min()`: Zod's JSON Schema emits `minLength` / `minItems`, which Gemini ignores.
+ */
+export const noteDocumentModelSchema = z.object({
+  title: z.string().describe("One title for the lecture."),
+  sections: z
+    .array(
+      z.object({
+        heading: z.string().optional().describe("A section heading taken from the notes."),
+        level: z
+          .union([z.literal(1), z.literal(2), z.literal(3)])
+          .optional()
+          .describe("1 is a top section. 3 is the deepest."),
+        blocks: z.array(noteDocumentBlockModelSchema),
+      }),
+    )
+    .describe("Every slide's points, under a heading hierarchy. Do not drop a slide."),
+  sourceReferences: z
+    .array(
+      z.object({
+        slideNumber: z.number().int().positive(),
+        elementId: z.string().optional(),
+      }),
+    )
+    .optional(),
+});
+
+export function noteDocumentRequestJsonSchema(): Record<string, unknown> {
+  return stripSchemaKeywords(noteDocumentModelSchema.toJSONSchema());
+}
+
 function stripSchemaKeywords(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return {};

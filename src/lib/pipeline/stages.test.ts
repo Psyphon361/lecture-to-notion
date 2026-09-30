@@ -5,6 +5,8 @@ import {
   initialStages,
   stagesAfterAnalyze,
   stagesAfterExtract,
+  stagesAfterOrganize,
+  stagesAfterOrganizeFailed,
   stagesAfterStructure,
   stagesAfterStructureStopped,
   stagesComplete,
@@ -75,5 +77,14 @@ describe("pipeline stages", () => {
     expect(stopped.map((stage) => stage.status)).toEqual(["done", "done", "pending", "pending"]);
     expect(stopped[2]?.detail).toBe("Stopped before every slide was structured.");
     expect(stopped[3]?.detail).toBe("Has not started.");
+  });
+
+  it("marks organization done or failed without reopening earlier stages", () => {
+    const done = stagesAfterOrganize();
+    expect(done.every((stage) => stage.status === "done")).toBe(true);
+
+    const failed = stagesAfterOrganizeFailed();
+    expect(failed.map((stage) => stage.status)).toEqual(["done", "done", "done", "pending"]);
+    expect(failed[3]?.detail).toBe("Organization failed.");
   });
 });

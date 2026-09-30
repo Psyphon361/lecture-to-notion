@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 
-import { NotePreview } from "@/components/preview/note-preview";
+import { DocumentPreview, NotePreview } from "@/components/preview/note-preview";
 import { ExtractionReview } from "@/components/review/extraction-review";
 import type { ImageOutcome } from "@/lib/ai/analyze-response";
-import type { SlideNotes } from "@/lib/documents/schema";
+import type { NoteDocument, SlideNotes } from "@/lib/documents/schema";
 import type { Presentation } from "@/lib/ppt/schema";
 
 type SlideView = "notes" | "extracted";
@@ -14,10 +14,12 @@ export function SlideWorkspace({
   presentation,
   outcomes = [],
   notes,
+  noteDocument,
 }: {
   presentation: Presentation;
   outcomes?: ImageOutcome[];
   notes?: SlideNotes[];
+  noteDocument?: NoteDocument;
 }) {
   const slides = presentation.slides;
   const [index, setIndex] = useState(0);
@@ -28,6 +30,7 @@ export function SlideWorkspace({
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (noteDocument && view === "notes") return;
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       if (event.altKey || event.ctrlKey || event.metaKey) return;
       if (isTypingTarget(event.target)) return;
@@ -40,18 +43,20 @@ export function SlideWorkspace({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [lastIndex]);
+  }, [lastIndex, noteDocument, view]);
 
   if (!slide) {
     return <p className="text-sm text-zinc-500">No slides were extracted.</p>;
   }
 
-  const notesReady = notes !== undefined;
-  const showingNotes = notesReady && view === "notes";
+  const notesReady = notes !== undefined || noteDocument !== undefined;
+  const showingDocument = noteDocument !== undefined && view === "notes";
+  const showingNotes = notes !== undefined && view === "notes" && !showingDocument;
   const position = currentIndex + 1;
 
   return (
-    <section className="flex flex-col gap-6" aria-label={`Slide ${slide.slideNumber}`}>
+    <section className="flex flex-col gap-6" aria-label={showingDocument ? "Notes" : `Slide ${slide.slideNumber}`}>
+      {showingDocument ? null : (
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -75,6 +80,7 @@ export function SlideWorkspace({
           Next
         </button>
       </div>
+      )}
       {notesReady ? (
         <div className="flex gap-2" role="group" aria-label={`Slide ${slide.slideNumber} view`}>
           <button
@@ -97,7 +103,9 @@ export function SlideWorkspace({
           </button>
         </div>
       ) : null}
-      {showingNotes ? (
+      {showingDocument && noteDocument ? (
+        <DocumentPreview document={noteDocument} />
+      ) : showingNotes ? (
         <NotePreview notes={notes} slides={slides} slideNumber={slide.slideNumber} />
       ) : (
         <ExtractionReview

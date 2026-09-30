@@ -2,7 +2,7 @@
 
 **Audience:** the coding/orchestrating agent working in `C:\dev\lecture-to-notes`.
 **Written:** Sep 29, 2026, at the end of the planning session in a different folder.
-**Status:** Phase 1 gate met (Sep 29, 2026). Phase 2 extraction is in the app. Phase 3 image analysis is in the app: `POST /api/analyze-images` skips decorative images and reads the rest with Gemini. Phase 4 per-slide notes are in the app: `POST /api/process-slide` structures one slide at a time (`processSlide`, prompt `slide-processing-v1`, one repair retry, then deterministic fallback). Organization has not started. S2 ran on a synthetic image (`docs/spikes/S2-gemini.md`). S3 has not started.
+**Status:** Phase 1 gate met (Sep 29, 2026). Phase 2 extraction is in the app. Phase 3 image analysis is in the app: `POST /api/analyze-images` skips decorative images and reads the rest with Gemini. Phase 4 per-slide notes are local: `fallbackSlideNotes` builds every slide from extracted text plus that image reading. Gemini is image-only. `processSlide` rejects, and `POST /api/process-slide` is gone. Phase 5 organization is local: `organizeLocally` turns those notes into one `NoteDocument` in the browser. `organizeNotes` rejects, and `POST /api/organize` is gone. S2 ran on a synthetic image (`docs/spikes/S2-gemini.md`). S3 has not started. Notion export has not started.
 
 ## 0. How to use this document
 
@@ -81,12 +81,13 @@ Updated Sep 29, 2026. Phase 2 parse route and extraction review landed the same 
 - Git is initialized. Nothing has been committed.
 - Phase 1 UI: PPTX validation (extension, 50 MB cap, ZIP magic bytes) on the client and `POST /api/upload`. The upload route does not store the file. Export to Notion is disabled.
 - `POST /api/parse` repeats those checks, parses, stores images, and returns `Presentation` JSON plus warnings. Image `assetId`s are storage keys. A malformed package returns a user-facing error. `purgeExpiredRuns` runs at the start of the request.
-- The upload screen calls `/api/parse`, then `/api/analyze-images`, then `POST /api/process-slide` once per slide. "Extract slides" completes when parse returns. "Analyze images" completes when the analyze call returns. "Structure each slide" completes when every slide returns notes. Organize stays pending and says it has not started. The review lists slide number, title or first line, text, and image boxes in reading order. Each image box shows a skip reason or the analysis. Interpretation is labeled as interpretation, and relationships are labeled as model output. The note preview shows those per-slide drafts. A missing key, 429, or 5xx stops the loop; slides already structured stay on screen. The fixture preview remains only when structuring did not run.
-- Slide processing lives in `src/lib/ai`: prompt `slide-processing-v1`, `fallbackSlideNotes`, and `processSlide`. One invalid model response is sent back with the validation error. A second invalid response keeps the slide text and adds a warning. A missing key, 429, or 5xx still throws. `POST /api/process-slide` accepts one slide, that slide's image outcomes, and the previous and next title or first line. It does not accept image bytes or the rest of the deck. `organizeNotes` still rejects.
+- The upload screen calls `/api/parse`, then `/api/analyze-images`, then builds each slide's notes locally with `fallbackSlideNotes`, then assembles one document with `organizeLocally`. There is no organize request. Gemini is image-only: a text-only deck makes no Gemini calls, and a picture deck calls Gemini once per image that was not skipped. There is no structuring request and no structuring progress screen. "Extract slides" completes when parse returns. "Analyze images" completes when the analyze call returns. "Structure each slide" is done when that local list exists. "Organize notes" completes when `organizeLocally` returns. The review lists slide number, title or first line, text, and image boxes in reading order. Each image box shows a skip reason or the analysis. Interpretation is labeled as interpretation, and relationships are labeled as model output. The Notes view shows that one document and a list of section headings that jump down the page. Extracted stays one slide at a time. Organization does not run when image analysis stops the run. There is no organize retry and no organize rate-limit message. The fixture preview remains only when notes were not built.
+- Slide notes are local, in `fallbackSlideNotes`. A title stays the title. Bullets and numbered lists keep their kind. Tables stay tables. Image text stays source. Image descriptions stay interpretation. A skipped image adds nothing. Nothing on the slide is reworded by a model. `processSlide` rejects before any generate call. `POST /api/process-slide` has been removed.
+- Organization is local, in `organizeLocally`. The title is the first slide title, or the file name when no slide has a title. Each slide is one section. The heading is the slide title, or "Slide N" when it has none. Section blocks are the slide blocks, copied, and a slide warning stays on that section. `organizeNotes` rejects before any generate call. `POST /api/organize` has been removed. The theme control is a sun or moon icon. Its accessible name is still "Switch to light mode" or "Switch to dark mode".
 - Image analysis uses `gemini-3.5-flash-lite` unless `GEMINI_MODEL` is set. Confirmed Sep 29, 2026 from the models page (updated 2026-09-24) and the pricing page: that id has a free tier, and new projects are pointed at 3.5 Flash-Lite or 3.8 Flash. `gemini-3.8-flash` returned 503 high demand on the synthetic image the same day. The key stays in `.env.local` as `GEMINI_API_KEY`.
 - Consent (Sep 29, 2026): Vasu's lecture may be sent to the Gemini free tier, where Google may use the content to improve its products.
 - `ts-pptx@0.1.1` is installed. `src/lib/ppt/parse-pptx.ts` normalizes a PPTX into `Presentation`, sha256 image bytes (`contentHash`, also the image `assetId` until storage assigns a key), and warnings. Slide order follows `p:sldIdLst`.
-- Local storage (`createLocalStorage`) writes extracted images under `.data/runs/<runId>/<sha256>` (gitignored), with a `<sha256>.meta.json` sidecar for the content type. The run id comes from `createRunId()` (UUID). The storage key is `<runId>/<sha256>`, and `put` rejects a key whose hash does not match the bytes. `purgeExpiredRuns` deletes run directories older than 24 hours. Parse uses that key as the image `assetId`. `GET /api/assets/<runId>/<hash>` returns those bytes and the stored content type. A key that is not a run id plus a content hash is 400. A missing file is 404. The route does not list directories. The extraction review and the notes draft show the pictures, including skipped logos, by URL. Image bytes stay out of the parse, analyze, and process-slide JSON. The committed synthetic deck is `fixtures/synthetic.pptx` (rebuild with `node fixtures/synthetic-deck.mjs`).
+- Local storage (`createLocalStorage`) writes extracted images under `.data/runs/<runId>/<sha256>` (gitignored), with a `<sha256>.meta.json` sidecar for the content type. The run id comes from `createRunId()` (UUID). The storage key is `<runId>/<sha256>`, and `put` rejects a key whose hash does not match the bytes. `purgeExpiredRuns` deletes run directories older than 24 hours. Parse uses that key as the image `assetId`. `GET /api/assets/<runId>/<hash>` returns those bytes and the stored content type. A key that is not a run id plus a content hash is 400. A missing file is 404. The route does not list directories. The extraction review and the notes draft show the pictures, including skipped logos, by URL. Image bytes stay out of the parse and analyze JSON. The committed synthetic deck is `fixtures/synthetic.pptx` (rebuild with `node fixtures/synthetic-deck.mjs`).
 - **Sample PPTX:** `fixtures/private/sample.pptx` (946,979 bytes). Original: `C:\Users\TanishSharma\OneDrive - TrnDigital\Desktop\sample.pptx`. Never modify the original. `fixtures/private/` is gitignored.
   - S1 inspected it. 18 slides, 4:3, Marketing Management / consumer buying decision process (Ms. Shivani Kanaria, MIET School of Law). Two logo PNGs, three content PNGs, one background JPEG, one boilerplate notes part, one hyperlink, one lettered quiz list. No tables, groups, connectors, charts, SmartArt, equations, EMF/WMF, or hidden slides. Details: `docs/spikes/S1-parser.md`.
   - Whether it is Vasu's lecture is still unanswered.
@@ -150,15 +151,13 @@ src/
       upload/                 # issue upload target / receive small files
       parse/                  # PPTX -> Presentation (+ image assets)
       analyze-image/          # ImageAnalysis for one image
-      process-slide/          # SlideNotes for one slide
-      organize/               # SlideNotes[] -> NoteDocument
       notion/export/          # NoteDocument -> Notion page
   components/{upload,processing,preview,notion}/
   lib/
     ppt/                      # parsing + normalization (deterministic)
     ai/                       # AIProvider interface + gemini impl + prompts/
       prompts/                # image-analysis.ts, slide-processing.ts, note-organization.ts (versioned)
-    documents/                # NoteDocument types, validation, transforms
+    documents/                # NoteDocument types, validation, organizeLocally
     notion/                   # adapter + client (NO AI logic)
     storage/                  # Storage interface: local temp FS impl, Blob impl later
   types/
@@ -185,8 +184,8 @@ Proposed flow (each server call is short and independently retryable):
 1. client uploads PPTX -> storage (direct upload)          -> returns runId
 2. POST /parse         -> Presentation JSON + image asset ids (images stored under runId)
 3. for each useful image: POST /analyze-image -> ImageAnalysis   (cached by content hash within run)
-4. for each slide:        POST /process-slide -> SlideNotes
-5. POST /organize         -> NoteDocument
+4. for each slide:        local fallbackSlideNotes (no Gemini call)
+5. local organizeLocally  -> NoteDocument (no Gemini call)
 6. preview (client)
 7. POST /notion/export    -> Notion page URL
 ```
@@ -402,7 +401,7 @@ Vercel Hobby: swap the storage implementation to Blob, set env vars, confirm `ma
 1. ~~Get the sample PPTX~~ **Done:** it is at `fixtures/private/sample.pptx`. More decks are counted in `docs/spikes/corpus.md`. Ask the user only whether the sample is Vasu's real lecture or a stand-in.
 2. Ask the user to **confirm the Notion approach** ([ASSUMED] internal token first, OAuth later). Can wait until Phase 7, but note it.
 3. ~~Run Spike S1~~ **Done** (`docs/spikes/S1-parser.md`). ~~S2~~ **Done** on a synthetic PNG only (`docs/spikes/S2-gemini.md`). S3 needs a Notion token. Do not send a lecture deck to Notion yet. The sample deck may go to Gemini only because consent was given Sep 29, 2026.
-4. ~~Scaffold Phase 1~~ **Done.** Next.js 16.3.7, npm, lint / typecheck / test. Phase 2 parser, local image storage, `POST /api/parse`, and the extraction review are in place. Phase 3 image analysis is in place. Phase 4 per-slide notes are in place: `POST /api/process-slide` and the per-slide preview. Organization has not started. Notion export stays off.
+4. ~~Scaffold Phase 1~~ **Done.** Next.js 16.3.7, npm, lint / typecheck / test. Phase 2 parser, local image storage, `POST /api/parse`, and the extraction review are in place. Phase 3 image analysis is in place. Phase 4 per-slide notes are local (`fallbackSlideNotes`); Gemini is image-only. Phase 5 organization is local (`organizeLocally`); Gemini stays image-only. Notion export stays off.
 5. ~~Shared types and Zod schemas~~ **Done** under `src/lib/`.
 
 ### Open items

@@ -4,12 +4,14 @@ import {
   GeminiCallError,
   ImageAnalysisInvalidError,
   MissingGeminiKeyError,
+  NoteOrganizationIsLocalError,
   analyzeImageDetailed,
   analyzeImageWithGemini,
   createGeminiProvider,
   geminiModelId,
-  processSlideDetailed,
+  organizeNotesWithGemini,
   processSlideWithGemini,
+  SlideNotesAreLocalError,
   type GeminiGenerate,
 } from "@/lib/ai/gemini";
 import type { ImageInput } from "@/lib/ai/provider";
@@ -136,179 +138,68 @@ describe("analyzeImageDetailed", () => {
     }
   });
 
-  it("leaves organization unimplemented", async () => {
-    const provider = createGeminiProvider();
-    await expect(provider.organizeNotes([])).rejects.toThrow(/has not started/);
-  });
 });
 
-describe("processSlideDetailed", () => {
-  it("checks the model response and sets the slide number itself", async () => {
-    const logs: string[] = [];
-    const generate = fakeGenerate([
-      JSON.stringify({
-        title: "Buying process",
-        blocks: [{ type: "paragraph", content: "Kept as written", provenance: "source" }],
-        sourceReferences: [{ slideNumber: 99, elementId: "s4-body" }],
-      }),
-    ]);
-
-    const result = await processSlideDetailed(
-      {
-        slide: lectureSlide(),
-        outcomes: [],
-        previousLine: "Previous title only",
-        nextLine: "Next first line only",
-      },
-      {
-        generate,
-        model: "gemini-3.8-flash",
-        log: (line) => logs.push(line),
-        now: () => 1_000,
-      },
-    );
-
-    expect(result.usedFallback).toBe(false);
-    expect(result.notes.slideNumber).toBe(4);
-    expect(result.notes.title).toBe("Buying process");
-    expect(result.notes.blocks).toEqual([
-      { type: "paragraph", content: "Kept as written", provenance: "source" },
-    ]);
-    expect(result.notes.sourceReferences).toEqual([{ slideNumber: 4, elementId: "s4-body" }]);
-    expect(JSON.stringify(result.notes)).not.toContain("Four conditions");
-    expect(result.model).toBe("gemini-3.8-flash");
-    expect(result.promptVersion).toBe("slide-processing-v1");
-    expect(result.inputTokens).toBe(11);
-    expect(result.outputTokens).toBe(7);
-    expect(logs).toEqual([
-      "slide-processing model=gemini-3.8-flash prompt=slide-processing-v1 inputTokens=11 outputTokens=7 latencyMs=0 outcome=ok",
-    ]);
-    expect(logs.join(" ")).not.toContain(SECRET);
-    expect(logs.join(" ")).not.toContain("BBALLB-203");
-    const request = generate.requests[0];
-    expect(request?.bytes).toBeUndefined();
-    expect(request?.mimeType).toBeUndefined();
-    expect(request?.prompt).toContain("Previous title only");
-    expect(request?.prompt).toContain("Next first line only");
-    expect(request?.prompt).toContain("Four conditions");
-    expect(request?.prompt).not.toContain("the rest of the deck");
-    const schema = JSON.stringify(request?.responseJsonSchema);
-    expect(schema).not.toContain("minLength");
-    expect(schema).not.toContain("minItems");
-    expect(schema).not.toContain("children");
-  });
-
-  it("retries once with the validation error and then uses the slide text", async () => {
-    const logs: string[] = [];
-    const generate = fakeGenerate(["not json", "{\"nope\":true}"]);
-    const result = await processSlideDetailed(
-      { slide: lectureSlide(), outcomes: [] },
-      { generate, model: "gemini-3.8-flash", log: (line) => logs.push(line) },
-    );
-
-    expect(generate.requests).toHaveLength(2);
-    expect(generate.requests[1]?.prompt).toContain("failed validation");
-    expect(result.usedFallback).toBe(true);
-    expect(result.notes.title).toBe("Buying process");
-    expect(result.notes.blocks).toEqual([
-      {
-        type: "paragraph",
-        content: `Four conditions: BBALLB-203 ${SECRET}`,
-        provenance: "source",
-      },
-    ]);
-    expect(result.notes.warnings).toEqual([
-      "The model response did not match the expected shape, so this slide keeps its source text.",
-    ]);
-    expect(logs[0]).toContain("outcome=invalid");
-    expect(logs[1]).toContain("outcome=fallback");
-    expect(logs.join(" ")).not.toContain(SECRET);
-  });
-
-  it("accepts a repaired response", async () => {
-    const generate = fakeGenerate([
-      "{\"nope\":true}",
-      JSON.stringify({
-        blocks: [{ type: "paragraph", content: "Repaired line", provenance: "source" }],
-        sourceReferences: [],
-      }),
-    ]);
-    const result = await processSlideDetailed(
-      { slide: lectureSlide(), outcomes: [] },
-      { generate, model: "gemini-3.8-flash", log: () => undefined },
-    );
-    expect(result.usedFallback).toBe(false);
-    expect(result.notes.blocks).toEqual([
-      { type: "paragraph", content: "Repaired line", provenance: "source" },
-    ]);
-    expect(result.notes.slideNumber).toBe(4);
-    expect(result.notes.warnings ?? []).not.toContain(
-      "The model response did not match the expected shape, so this slide keeps its source text.",
-    );
-  });
-
-  it("retries a 429 and does not retry or fall back on a 5xx", async () => {
-    const sleeps: number[] = [];
-    let calls = 0;
-    const generate: GeminiGenerate = async () => {
-      calls += 1;
-      if (calls < 3) throw new GeminiCallError(429);
-      return {
-        text: JSON.stringify({
-          blocks: [{ type: "paragraph", content: "After the wait", provenance: "source" }],
-          sourceReferences: [],
-        }),
-        inputTokens: 1,
-        outputTokens: 1,
-      };
-    };
-    const result = await processSlideDetailed(
-      { slide: lectureSlide(), outcomes: [] },
-      {
-        generate,
-        model: "gemini-3.8-flash",
-        sleep: async (ms) => {
-          sleeps.push(ms);
-        },
-        log: () => undefined,
-      },
-    );
-    expect(result.notes.blocks[0]).toMatchObject({ content: "After the wait" });
-    expect(result.usedFallback).toBe(false);
-    expect(calls).toBe(3);
-    expect(sleeps).toEqual([1000, 2000]);
-
-    let serverErrors = 0;
-    const failing: GeminiGenerate = async () => {
-      serverErrors += 1;
-      throw new GeminiCallError(503);
-    };
-    await expect(
-      processSlideDetailed(
-        { slide: lectureSlide(), outcomes: [] },
-        {
-          generate: failing,
-          model: "gemini-3.8-flash",
-          sleep: async () => {
-            throw new Error("should not wait");
-          },
-          log: () => undefined,
-        },
-      ),
-    ).rejects.toMatchObject({ status: 503 });
-    expect(serverErrors).toBe(1);
-  });
-
-  it("does not call Gemini when the key is missing", async () => {
+describe("processSlide", () => {
+  it("rejects a text slide and a picture reading before any Gemini call", async () => {
     const previous = process.env.GEMINI_API_KEY;
-    delete process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = "present-key";
     try {
       await expect(
         processSlideWithGemini({ slide: lectureSlide(), outcomes: [] }),
-      ).rejects.toBeInstanceOf(MissingGeminiKeyError);
+      ).rejects.toBeInstanceOf(SlideNotesAreLocalError);
       await expect(
-        createGeminiProvider().processSlide({ slide: lectureSlide(), outcomes: [] }),
-      ).rejects.toBeInstanceOf(MissingGeminiKeyError);
+        createGeminiProvider().processSlide({
+          slide: lectureSlide(),
+          outcomes: [
+            {
+              imageId: "s4-img",
+              status: "analyzed",
+              analysis: {
+                imageId: "s4-img",
+                containsUsefulInformation: true,
+                extractedText: "On the picture",
+                description: "A diagram.",
+              },
+            },
+          ],
+        }),
+      ).rejects.toBeInstanceOf(SlideNotesAreLocalError);
+    } finally {
+      if (previous === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previous;
+    }
+  });
+});
+
+describe("organizeNotes", () => {
+  it("rejects before any Gemini call", async () => {
+    const previous = process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEY = "present-key";
+    const notes = [
+      {
+        slideNumber: 1,
+        title: "Opening",
+        blocks: [{ type: "paragraph" as const, content: "Four conditions", provenance: "source" as const }],
+        sourceReferences: [{ slideNumber: 1 }],
+      },
+      {
+        slideNumber: 2,
+        blocks: [
+          {
+            type: "paragraph" as const,
+            content: "A diagram of the conflict.",
+            provenance: "interpretation" as const,
+          },
+        ],
+        sourceReferences: [{ slideNumber: 2 }],
+      },
+    ];
+    try {
+      await expect(organizeNotesWithGemini(notes)).rejects.toBeInstanceOf(NoteOrganizationIsLocalError);
+      await expect(createGeminiProvider().organizeNotes(notes)).rejects.toBeInstanceOf(
+        NoteOrganizationIsLocalError,
+      );
     } finally {
       if (previous === undefined) delete process.env.GEMINI_API_KEY;
       else process.env.GEMINI_API_KEY = previous;

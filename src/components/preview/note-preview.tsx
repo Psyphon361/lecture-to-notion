@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { StoredImage } from "@/components/assets/stored-image";
-import type { NoteBlock, NoteListItem, SlideNotes } from "@/lib/documents/schema";
+import type { NoteBlock, NoteDocument, NoteListItem, SlideNotes } from "@/lib/documents/schema";
 import { storedAssetSrc } from "@/lib/storage/asset-url";
 import type { Slide } from "@/lib/ppt/schema";
 
@@ -48,6 +48,53 @@ export function NotePreview({
       ))}
     </article>
   );
+}
+
+export function DocumentPreview({ document }: { document: NoteDocument }) {
+  const jumps = document.sections.flatMap((section, index) => {
+    const heading = section.heading?.trim();
+    if (!heading) return [];
+    return [{ index, heading }];
+  });
+
+  return (
+    <article className="flex flex-col gap-6">
+      <h2 className="text-2xl font-semibold">{document.title}</h2>
+      {jumps.length > 0 ? (
+        <nav aria-label="Sections">
+          <ol className="list-decimal space-y-1 pl-5 text-sm">
+            {jumps.map((jump) => (
+              <li key={jump.index}>
+                <a className="underline" href={`#${sectionId(jump.index)}`}>
+                  {jump.heading}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      ) : null}
+      {document.sections.map((section, index) => {
+        const heading = section.heading?.trim();
+        const HeadingTag = section.level === 3 ? "h5" : section.level === 2 ? "h4" : "h3";
+        return (
+          <section key={index} className="flex flex-col gap-3">
+            {heading ? (
+              <HeadingTag id={sectionId(index)} className="scroll-mt-6 font-semibold">
+                {heading}
+              </HeadingTag>
+            ) : null}
+            {section.blocks.map((block, blockIndex) => (
+              <BlockView key={blockIndex} block={block} />
+            ))}
+          </section>
+        );
+      })}
+    </article>
+  );
+}
+
+function sectionId(index: number): string {
+  return `note-section-${index}`;
 }
 
 function BlockView({ block }: { block: NoteBlock }) {

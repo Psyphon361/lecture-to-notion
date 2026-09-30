@@ -75,6 +75,9 @@ describe("lecture flow", () => {
         }
         return json({ ok: true, outcomes: [] });
       }
+      if (url.endsWith("/api/organize") || url.endsWith("/api/process-slide")) {
+        throw new Error(`Unexpected request ${url}`);
+      }
       const slideNumber = body?.slide?.slideNumber ?? 1;
       return json({
         slideNumber,
@@ -98,6 +101,7 @@ describe("lecture flow", () => {
     expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeNull();
     expect(container.querySelector("[aria-label='Slides']")).toBeNull();
     expect(container.querySelector("button[aria-label='Previous slide']")).toBeNull();
+    expect(calls.some((call) => call.url.endsWith("/api/organize"))).toBe(false);
 
     await clickText(container, "View extracted slides");
     expect(container.textContent).toContain("1 of 2");
@@ -108,10 +112,19 @@ describe("lecture flow", () => {
     expect(container.querySelector("[aria-label='Slides']")).toBeNull();
 
     await clickText(container, "Try again");
-    expect(container.textContent).toContain("Note 1");
-    expect(container.textContent).toContain("1 of 2");
+    expect(container.textContent).toContain("Body 1");
+    expect(container.textContent).toContain("Body 2");
+    expect(container.textContent).toContain("Slide 1");
+    expect(container.textContent).toContain("Slide 2");
+    expect(container.querySelector("a[href='#note-section-0']")).toBeTruthy();
+    expect(container.querySelector("a[href='#note-section-1']")).toBeTruthy();
+    expect(container.textContent).not.toContain("1 of 2");
     expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeTruthy();
     expect(container.textContent).not.toContain("Export to Notion");
+
+    await clickText(container, "Extracted");
+    expect(container.textContent).toContain("1 of 2");
+    expect(container.textContent).toContain("Body 1");
 
     const parses = calls.filter((call) => call.url.endsWith("/api/parse"));
     const analyses = calls.filter((call) => call.url.endsWith("/api/analyze-images"));
@@ -119,8 +132,118 @@ describe("lecture flow", () => {
     expect(parses[0]?.form).toBe(true);
     expect(analyses).toHaveLength(2);
     expect(analyses.every((call) => call.form === false && call.runId === runId)).toBe(true);
+    expect(calls.filter((call) => call.url.endsWith("/api/organize"))).toHaveLength(0);
+    expect(calls.filter((call) => call.url.endsWith("/api/process-slide"))).toHaveLength(0);
+  });
+
+  it("assembles the document locally and does not call organize", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/api/parse")) {
+        return json({ ok: true, runId, presentation, warnings: [] });
+      }
+      if (url.endsWith("/api/analyze-images")) {
+        return json({ ok: true, outcomes: [] });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    const container = await render(<LectureFlow />);
+    await chooseFile(container);
+
+    expect(container.textContent).toContain("Body 1");
+    expect(container.textContent).toContain("Body 2");
+    expect(container.textContent).toContain("lecture.pptx");
+    expect(container.querySelector("a[href='#note-section-0']")?.textContent).toBe("Slide 1");
+    expect(container.querySelector("a[href='#note-section-1']")?.textContent).toBe("Slide 2");
+    expect(container.textContent).not.toContain("rate limiting");
+    expect(container.textContent).toContain("Organization is done.");
+    expect(calls.filter((url) => url.endsWith("/api/organize"))).toHaveLength(0);
+    expect(calls.filter((url) => url.endsWith("/api/process-slide"))).toHaveLength(0);
+    expect(calls.filter((url) => url.endsWith("/api/parse"))).toHaveLength(1);
+  });
+
+  it("builds a text slide and a picture reading locally and does not structure them", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith("/api/parse")) {
+        return json({ ok: true, runId, presentation: mixedDeck, warnings: [] });
+      }
+      if (url.endsWith("/api/analyze-images")) {
+        return json({
+          ok: true,
+          outcomes: [
+            {
+              imageId: "img-1",
+              status: "analyzed",
+              analysis: {
+                imageId: "img-1",
+                containsUsefulInformation: true,
+                extractedText: "Words in the picture",
+                description: "A diagram of the conflict.",
+              },
+            },
+          ],
+        });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    const container = await render(<LectureFlow />);
+    await chooseFile(container);
+
+    expect(container.textContent).toContain("Need and meaning");
+    expect(container.textContent).toContain("Conflict on the slide");
+    expect(container.textContent).toContain("Words in the picture");
+    expect(container.textContent).toContain("A diagram of the conflict.");
+    expect(container.textContent).toContain("Structured.");
+    expect(container.textContent).toContain("Organization is done.");
+    expect(calls.filter((url) => url.endsWith("/api/process-slide"))).toHaveLength(0);
+    expect(calls.filter((url) => url.endsWith("/api/analyze-images"))).toHaveLength(1);
+    expect(calls.filter((url) => url.endsWith("/api/organize"))).toHaveLength(0);
   });
 });
+
+const hash = "a".repeat(64);
+
+const mixedDeck = {
+  id: "deck",
+  filename: "lecture.pptx",
+  slides: [
+    {
+      slideNumber: 1,
+      elements: [
+        {
+          id: "text-1",
+          type: "text",
+          isTitle: true,
+          paragraphs: [{ text: "Need and meaning", level: 0 }],
+        },
+        {
+          id: "text-body",
+          type: "text",
+          paragraphs: [{ text: "Conflict on the slide", level: 0, bullet: "bullet" }],
+        },
+      ],
+    },
+    {
+      slideNumber: 2,
+      elements: [
+        {
+          id: "img-1",
+          type: "image",
+          assetId: `${runId}/${hash}`,
+          contentHash: hash,
+          mimeType: "image/png",
+        },
+      ],
+    },
+  ],
+};
 
 async function render(node: ReactNode): Promise<HTMLDivElement> {
   const container = document.createElement("div");

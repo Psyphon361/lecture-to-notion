@@ -7,10 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { ProcessingStatus } from "@/components/processing/processing-status";
 import { SlideWorkspace } from "@/components/review/slide-workspace";
-import type { SlideNotes } from "@/lib/documents/schema";
+import type { NoteDocument, SlideNotes } from "@/lib/documents/schema";
 import {
   initialStages,
   stagesAfterExtract,
+  stagesAfterOrganize,
+  stagesAfterOrganizeFailed,
   stagesAfterStructure,
   stagesAfterStructureStopped,
 } from "@/lib/pipeline/stages";
@@ -150,6 +152,43 @@ describe("review status", () => {
       <ProcessingStatus compact stages={stagesAfterExtract()} />,
     );
     expect(extracted.textContent).toBe("Extracted. Organization has not started.");
+
+    const organized = await render(
+      <ProcessingStatus compact stages={stagesAfterOrganize()} />,
+    );
+    expect(organized.textContent).toBe("Structured. Organization is done.");
+
+    const failed = await render(
+      <ProcessingStatus compact stages={stagesAfterOrganizeFailed()} />,
+    );
+    expect(failed.textContent).toBe("Structured. Organization failed.");
+  });
+
+  it("shows one document and keeps extracted slides one at a time", async () => {
+    const container = await render(
+      <SlideWorkspace
+        presentation={deck(2)}
+        notes={draftNotes(2)}
+        outcomes={[]}
+        noteDocument={organizedDocument()}
+      />,
+    );
+
+    expect(container.textContent).toContain("Lecture notes");
+    expect(container.textContent).toContain("Opening");
+    expect(container.textContent).toContain("Closing");
+    expect(container.textContent).toContain("Note 1");
+    expect(container.textContent).toContain("Note 2");
+    expect(container.querySelector("a[href='#note-section-0']")?.textContent).toBe("Opening");
+    expect(container.querySelector("a[href='#note-section-1']")?.textContent).toBe("Closing");
+    expect(container.textContent).not.toContain("1 of 2");
+    expect(container.querySelector("button[aria-label='Previous slide']")).toBeNull();
+
+    await click(container, "Slide 1 extracted");
+    expect(position(container)).toBe("1 of 2");
+    expect(container.textContent).toContain("Body 1");
+    expect(container.textContent).not.toContain("Body 2");
+    expect(container.textContent).not.toContain("Opening");
   });
 
   it("keeps the full stage list on a processing screen", async () => {
@@ -221,6 +260,24 @@ function deck(count: number): Presentation {
         ],
       };
     }),
+  };
+}
+
+function organizedDocument(): NoteDocument {
+  return {
+    title: "Lecture notes",
+    sections: [
+      {
+        heading: "Opening",
+        level: 1,
+        blocks: [{ type: "paragraph", content: "Note 1", provenance: "source" }],
+      },
+      {
+        heading: "Closing",
+        level: 2,
+        blocks: [{ type: "paragraph", content: "Note 2", provenance: "source" }],
+      },
+    ],
   };
 }
 

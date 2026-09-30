@@ -112,6 +112,36 @@ export function stagesAfterStructure(): StageState[] {
   }));
 }
 
+/** Slide notes are ready. Organization is in progress. */
+export function stagesWhileOrganizing(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail: stage.detail,
+    status: stage.id === "organize" ? "active" : "done",
+  }));
+}
+
+/** The lecture is one document. */
+export function stagesAfterOrganize(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail: stage.detail,
+    status: "done",
+  }));
+}
+
+/** Organization failed. The slide notes are still the review. */
+export function stagesAfterOrganizeFailed(): StageState[] {
+  return PIPELINE_STAGES.map((stage) => ({
+    id: stage.id,
+    label: stage.label,
+    detail: stage.id === "organize" ? "Organization failed." : stage.detail,
+    status: stage.id === "organize" ? "pending" : "done",
+  }));
+}
+
 /** Structuring stopped before every slide returned. Organize has not started. */
 export function stagesAfterStructureStopped(): StageState[] {
   return PIPELINE_STAGES.map((stage) => ({

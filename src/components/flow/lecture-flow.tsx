@@ -12,16 +12,15 @@ import {
   presentationWithAnalyses,
   type ImageOutcome,
 } from "@/lib/ai/analyze-response";
-import { structureSlides, type SlidePostResult } from "@/lib/ai/structure-slides";
-import type { SlideNotes } from "@/lib/documents/schema";
+import { fallbackSlideNotes } from "@/lib/ai/slide-fallback";
+import { organizeLocally } from "@/lib/documents/organize-locally";
+import type { NoteDocument, SlideNotes } from "@/lib/documents/schema";
 import { parseFailureSchema, parseSuccessSchema } from "@/lib/ppt/parse-response";
 import type { Presentation } from "@/lib/ppt/schema";
 import {
   initialStages,
-  stagesAfterStructure,
-  stagesAfterStructureStopped,
+  stagesAfterOrganize,
   stagesWhileAnalyzing,
-  stagesWhileStructuring,
   type StageState,
 } from "@/lib/pipeline/stages";
 
@@ -37,7 +36,6 @@ type FlowState =
   | { phase: "rejected"; message: string }
   | { phase: "extracting"; filename: string; stages: StageState[] }
   | { phase: "analyzing"; filename: string; stages: StageState[] }
-  | { phase: "structuring"; filename: string; stages: StageState[]; completed: number; total: number }
   | (StoredRun & {
       phase: "analyze-stopped";
       message: string;
@@ -51,7 +49,7 @@ type FlowState =
       warnings: string[];
       outcomes: ImageOutcome[];
       notes?: SlideNotes[];
-      structureMessage?: string;
+      document?: NoteDocument;
     };
 
 export function LectureFlow() {
@@ -113,41 +111,32 @@ export function LectureFlow() {
       return;
     }
     const presentation = presentationWithAnalyses(run.presentation, analyzed.outcomes);
-    const structured = await structureSlides(
-      presentation.slides,
-      analyzed.outcomes,
-      postProcessSlide,
-      (completed, total) => {
-        setFlow({
-          phase: "structuring",
-          filename: run.filename,
-          stages: stagesWhileStructuring(),
-          completed,
-          total,
-        });
-      },
-    );
-    if (structured.ok) {
-      setFlow({
-        phase: "review",
-        filename: run.filename,
-        stages: stagesAfterStructure(),
-        presentation,
-        warnings: run.warnings,
-        outcomes: analyzed.outcomes,
-        notes: structured.notes,
-      });
-      return;
-    }
-    setFlow({
-      phase: "review",
+    const notes = presentation.slides.map((slide) => fallbackSlideNotes(slide, analyzed.outcomes));
+    organizeStructuredNotes({
       filename: run.filename,
-      stages: stagesAfterStructureStopped(),
       presentation,
       warnings: run.warnings,
       outcomes: analyzed.outcomes,
-      notes: structured.notes,
-      structureMessage: structured.message,
+      notes,
+    });
+  }
+
+  function organizeStructuredNotes(review: {
+    filename: string;
+    presentation: Presentation;
+    warnings: string[];
+    outcomes: ImageOutcome[];
+    notes: SlideNotes[];
+  }) {
+    setFlow({
+      phase: "review",
+      filename: review.filename,
+      stages: stagesAfterOrganize(),
+      presentation: review.presentation,
+      warnings: review.warnings,
+      outcomes: review.outcomes,
+      notes: review.notes,
+      document: organizeLocally(review.notes, review.filename),
     });
   }
 
@@ -166,21 +155,6 @@ export function LectureFlow() {
       <ProcessingStatus
         title="Analyzing images"
         summary={`Reading diagrams and screenshots in ${flow.filename}. Structuring and organization have not started.`}
-        stages={flow.stages}
-      />
-    );
-  }
-
-  if (flow.phase === "structuring") {
-    const current = flow.total === 0 ? 0 : Math.min(flow.completed + 1, flow.total);
-    return (
-      <ProcessingStatus
-        title="Structuring slides"
-        summary={
-          flow.total === 0
-            ? `No slides were found in ${flow.filename}. Organization has not started.`
-            : `Structuring slide ${current} of ${flow.total} in ${flow.filename}. Organization has not started.`
-        }
         stages={flow.stages}
       />
     );
@@ -249,15 +223,11 @@ export function LectureFlow() {
             </ul>
           </div>
         ) : null}
-        {flow.structureMessage ? (
-          <p role="alert" className="text-sm text-red-700 dark:text-red-300">
-            {flow.structureMessage}
-          </p>
-        ) : null}
         <SlideWorkspace
           presentation={flow.presentation}
           outcomes={flow.outcomes}
           notes={flow.notes}
+          noteDocument={flow.document}
         />
       </div>
     );
@@ -280,16 +250,6 @@ const primaryButtonClass =
 
 const secondaryButtonClass =
   "rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium dark:border-zinc-700";
-
-async function postProcessSlide(body: unknown): Promise<SlidePostResult> {
-  const response = await fetch("/api/process-slide", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const payload: unknown = await response.json();
-  return { ok: response.ok, payload };
-}
 
 async function requestImageAnalysis(
   runId: string,
