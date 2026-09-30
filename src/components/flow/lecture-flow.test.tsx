@@ -122,7 +122,7 @@ describe("lecture flow", () => {
     expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeNull();
     expect(container.querySelector("[aria-label='Slide 1 extracted']")).toBeNull();
     expect(textButtonOrNull(container, "Extracted")).toBeNull();
-    expect(container.textContent).not.toContain("Export to Notion");
+    expect(textButton(container, "Export to Notion")).toBeTruthy();
 
     const parses = calls.filter((call) => call.url.endsWith("/api/parse"));
     const analyses = calls.filter((call) => call.url.endsWith("/api/analyze-images"));
@@ -161,6 +161,7 @@ describe("lecture flow", () => {
     expect(container.querySelector("nav")).toBeNull();
     expect(container.textContent).not.toContain("rate limiting");
     expect(container.textContent).toContain("Organization is done.");
+    expect(textButton(container, "Export to Notion")).toBeTruthy();
     expect(calls.filter((url) => url.endsWith("/api/organize"))).toHaveLength(0);
     expect(calls.filter((url) => url.endsWith("/api/process-slide"))).toHaveLength(0);
     expect(calls.filter((url) => url.endsWith("/api/parse"))).toHaveLength(1);
@@ -206,6 +207,40 @@ describe("lecture flow", () => {
     expect(calls.filter((url) => url.endsWith("/api/process-slide"))).toHaveLength(0);
     expect(calls.filter((url) => url.endsWith("/api/analyze-images"))).toHaveLength(1);
     expect(calls.filter((url) => url.endsWith("/api/organize"))).toHaveLength(0);
+  });
+
+  it("shows the Notion URL after export and the error when export fails", async () => {
+    let exportAttempts = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/parse")) {
+        return json({ ok: true, runId, presentation, warnings: [] });
+      }
+      if (url.endsWith("/api/analyze-images")) {
+        return json({ ok: true, outcomes: [] });
+      }
+      if (url.endsWith("/api/notion/export")) {
+        exportAttempts += 1;
+        const body = JSON.parse(String(init?.body)) as { document?: { title?: string } };
+        expect(body.document?.title).toBe("lecture.pptx");
+        if (exportAttempts === 1) {
+          return json({ ok: false, message: "Notion rejected the export." }, 502);
+        }
+        return json({ ok: true, pageUrl: "https://www.notion.so/Lecture-notes" });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    const container = await render(<LectureFlow />);
+    await chooseFile(container);
+    await clickText(container, "Export to Notion");
+    expect(container.querySelector("[role='alert']")?.textContent).toBe("Notion rejected the export.");
+    expect(container.querySelector("a[href='https://www.notion.so/Lecture-notes']")).toBeNull();
+
+    await clickText(container, "Export to Notion");
+    const link = container.querySelector("a[href='https://www.notion.so/Lecture-notes']");
+    expect(link?.textContent).toBe("https://www.notion.so/Lecture-notes");
+    expect(container.querySelector("[role='alert']")).toBeNull();
   });
 });
 

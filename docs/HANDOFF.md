@@ -2,7 +2,7 @@
 
 **Audience:** the coding/orchestrating agent working in `C:\dev\lecture-to-notes`.
 **Written:** Sep 29, 2026, at the end of the planning session in a different folder.
-**Status:** Phase 1 gate met (Sep 29, 2026). Phase 2 extraction is in the app. Phase 3 image analysis is in the app: `POST /api/analyze-images` skips decorative images and reads the rest with Gemini. Phase 4 per-slide notes are local: `fallbackSlideNotes` builds every slide from extracted text plus that image reading. Gemini is image-only. `processSlide` rejects, and `POST /api/process-slide` is gone. Phase 5 organization is local: `organizeLocally` turns those notes into one `NoteDocument` in the browser. `organizeNotes` rejects, and `POST /api/organize` is gone. S2 ran on a synthetic image (`docs/spikes/S2-gemini.md`). S3 has not started. Notion export has not started.
+**Status:** Phase 1 gate met (Sep 29, 2026). Phase 2 extraction is in the app. Phase 3 image analysis is in the app: `POST /api/analyze-images` skips decorative images and reads the rest with Gemini. Phase 4 per-slide notes are local: `fallbackSlideNotes` builds every slide from extracted text plus that image reading. Gemini is image-only. `processSlide` rejects, and `POST /api/process-slide` is gone. Phase 5 organization is local: `organizeLocally` turns those notes into one `NoteDocument` in the browser. `organizeNotes` rejects, and `POST /api/organize` is gone. S2 ran on a synthetic image (`docs/spikes/S2-gemini.md`). S3 (Sep 30, 2026) confirmed `Notion-Version: 2026-03-11` and a single-part PNG upload (`docs/spikes/S3-notion.md`). Page creation, image attach, and the live chunk-limit checks are waiting on `NOTION_PARENT_PAGE_ID` and a parent page shared with the connection. The review screen can call `POST /api/notion/export`.
 
 ## 0. How to use this document
 
@@ -93,7 +93,7 @@ Updated Sep 29, 2026. Phase 2 parse route and extraction review landed the same 
   - Whether it is Vasu's lecture is still unanswered.
   - At about 0.9 MB it does not exercise the large-upload path.
 - **Private corpus (Sep 29, 2026):** counted in `docs/spikes/corpus.md`. Five unique picture decks are one PNG per slide and have no native text. `child-conflict-need-meaning.pptx` is 35 slides with 2 tables and a notes part on every slide; parser cell text and speaker notes match the package. `Juvenile_Justice_and_ChildRights.pptx` is a byte-for-byte duplicate of `Juvenile_Justice_and_Child_Rights.pptx`. `Juvenile_Justice_and_Child_Rights.pptx.pdf` is not a deck. Parsed in-process only.
-- No Notion integration. `.env.local` holds `GEMINI_API_KEY` and is gitignored. `.env.example` lists the later keys.
+- Notion export maps a `NoteDocument` to blocks in `src/lib/notion/adapter.ts` (no network). `POST /api/notion/export` creates a child page under `NOTION_PARENT_PAGE_ID`, appends children in chunks of 100, splits rich text at 2,000 characters, and uploads kept images from local storage with the File Upload API. A missing token, missing parent id, or Notion error returns a message and no page URL. The notes review shows Export to Notion once a document exists, and shows the returned URL on success. `.env.local` holds `GEMINI_API_KEY` and `NOTION_TOKEN` (gitignored). `NOTION_PARENT_PAGE_ID` is still empty. `.env.example` lists the keys.
 
 ---
 
@@ -118,11 +118,11 @@ Updated Sep 29, 2026. Phase 2 parse route and extraction review landed the same 
 
 ### 5.3 Notion API
 - **File upload flow:** `POST /v1/file_uploads` (mode `single_part` default; `multi_part` for over 20 MB; `external_url` also exists) -> send bytes to the returned `upload_url` as `multipart/form-data` with field `file` -> attach using `{ type: "file_upload", file_upload: { id } }` in an `image` block via `PATCH /v1/blocks/{id}/children`. Uploaded files must be attached **within 1 hour**, and Notion-hosted file URLs expire after 1 hour (re-fetch to refresh).
-- Docs example used header `Notion-Version: 2026-03-11`. **Check the currently required version.**
+- Header `Notion-Version: 2026-03-11` was accepted on Sep 30, 2026 by `GET /v1/users/me` and the File Upload API (`docs/spikes/S3-notion.md`).
 - Connection types: internal connections, public connections (OAuth 2.0), and personal access tokens. Public connections can be created and used without a Marketplace listing (a security review is only needed for listing).
 - Internal connections need pages explicitly shared with the integration (Content access tab or the "Add connections" menu in Notion). The V1 setup must document this step; otherwise export fails with a permissions/not-found error.
 - Integration needs "insert content" capability at minimum.
-- Block-children append calls are size-limited (Notion enforces a maximum number of children per request and rich-text length limits). **[VERIFY]** exact limits and chunk accordingly in the adapter; don't assume.
+- Block-children append calls accept at most **100** children. Rich text `text.content` is at most **2,000** characters. Both are from the request-limits page (checked Sep 30, 2026). A live rejection of 101 children and of 2,001 characters was not run, because the integration could see no parent page. The adapter chunks at those documented limits.
 
 ### 5.4 PPTX parser candidates (quality NOT verified; spike required)
 | Library | Notes |
@@ -400,8 +400,8 @@ Vercel Hobby: swap the storage implementation to Blob, set env vars, confirm `ma
 ### First actions, in order
 1. ~~Get the sample PPTX~~ **Done:** it is at `fixtures/private/sample.pptx`. More decks are counted in `docs/spikes/corpus.md`. Ask the user only whether the sample is Vasu's real lecture or a stand-in.
 2. Ask the user to **confirm the Notion approach** ([ASSUMED] internal token first, OAuth later). Can wait until Phase 7, but note it.
-3. ~~Run Spike S1~~ **Done** (`docs/spikes/S1-parser.md`). ~~S2~~ **Done** on a synthetic PNG only (`docs/spikes/S2-gemini.md`). S3 needs a Notion token. Do not send a lecture deck to Notion yet. The sample deck may go to Gemini only because consent was given Sep 29, 2026.
-4. ~~Scaffold Phase 1~~ **Done.** Next.js 16.3.7, npm, lint / typecheck / test. Phase 2 parser, local image storage, `POST /api/parse`, and the extraction review are in place. Phase 3 image analysis is in place. Phase 4 per-slide notes are local (`fallbackSlideNotes`); Gemini is image-only. Phase 5 organization is local (`organizeLocally`); Gemini stays image-only. Notion export stays off.
+3. ~~Run Spike S1~~ **Done** (`docs/spikes/S1-parser.md`). ~~S2~~ **Done** on a synthetic PNG only (`docs/spikes/S2-gemini.md`). S3 confirmed the version header and one PNG upload (`docs/spikes/S3-notion.md`). Do not send a lecture deck to Notion until a shared parent page accepts a throwaway page. The sample deck may go to Gemini only because consent was given Sep 29, 2026.
+4. ~~Scaffold Phase 1~~ **Done.** Next.js 16.3.7, npm, lint / typecheck / test. Phase 2 parser, local image storage, `POST /api/parse`, and the extraction review are in place. Phase 3 image analysis is in place. Phase 4 per-slide notes are local (`fallbackSlideNotes`); Gemini is image-only. Phase 5 organization is local (`organizeLocally`); Gemini stays image-only. Phase 7 export code is in the app and stays idle until `NOTION_PARENT_PAGE_ID` is set.
 5. ~~Shared types and Zod schemas~~ **Done** under `src/lib/`.
 
 ### Open items
@@ -410,8 +410,8 @@ Vercel Hobby: swap the storage implementation to Blob, set env vars, confirm `ma
 - [x] More decks are in `fixtures/private/`, including larger image-heavy ones. Counts: `docs/spikes/corpus.md`
 - [x] Gemini API key (in `.env.local` as `GEMINI_API_KEY`; not committed)
 - [x] Vasu's explicit consent for free-tier data use (Sep 29, 2026)
-- [ ] Notion approach confirmation
-- [ ] Notion integration created and a target parent page shared with it (Phase 7)
+- [x] Notion approach: API token in `.env.local`. OAuth stays out (Sep 30, 2026)
+- [ ] Notion parent page shared with the connection and with Vasu, then `NOTION_PARENT_PAGE_ID` set. The token works. Search on Sep 30, 2026 returned no pages
 - [x] Parser spike result (S1): `ts-pptx@0.1.1` plus our normalizer. Hard OOXML cases were not in the sample
 - [x] Current Gemini model id for this app: `gemini-3.5-flash-lite` (free tier). `gemini-3.8-flash` is the newer stable Flash and was returning 503 high demand on Sep 29, 2026. Rate limits are still project-specific and unmeasured for a full lecture
 - [x] Max upload size cap: 50 MB locally. Vercel 4.5 MB still applies to function bodies

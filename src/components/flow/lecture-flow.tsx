@@ -223,6 +223,7 @@ export function LectureFlow() {
             </ul>
           </div>
         ) : null}
+        {flow.document ? <NotionExport document={flow.document} /> : null}
         <SlideWorkspace
           presentation={flow.presentation}
           outcomes={flow.outcomes}
@@ -250,6 +251,79 @@ const primaryButtonClass =
 
 const secondaryButtonClass =
   "rounded-full border border-zinc-300 px-4 py-2 text-sm font-medium dark:border-zinc-700";
+
+function NotionExport({ document }: { document: NoteDocument }) {
+  const [exporting, setExporting] = useState(false);
+  const [pageUrl, setPageUrl] = useState<string>();
+  const [message, setMessage] = useState<string>();
+
+  async function onExport() {
+    setExporting(true);
+    setMessage(undefined);
+    setPageUrl(undefined);
+    try {
+      const response = await fetch("/api/notion/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ document }),
+      });
+      const payload: unknown = await response.json();
+      const success = readExportSuccess(payload);
+      if (response.ok && success) {
+        setPageUrl(success);
+        return;
+      }
+      setMessage(readExportFailure(payload) ?? "Notion export failed. Try again.");
+    } catch {
+      setMessage("Notion export failed. Try again.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <button
+        type="button"
+        className={primaryButtonClass}
+        disabled={exporting}
+        onClick={() => void onExport()}
+      >
+        {exporting ? "Exporting…" : "Export to Notion"}
+      </button>
+      {pageUrl ? (
+        <a href={pageUrl} className="text-sm font-medium underline">
+          {pageUrl}
+        </a>
+      ) : null}
+      {message ? (
+        <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+          {message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function readExportSuccess(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null || !("ok" in payload) || payload.ok !== true) {
+    return null;
+  }
+  if (!("pageUrl" in payload) || typeof payload.pageUrl !== "string" || !payload.pageUrl.startsWith("https://")) {
+    return null;
+  }
+  return payload.pageUrl;
+}
+
+function readExportFailure(payload: unknown): string | null {
+  if (typeof payload !== "object" || payload === null || !("ok" in payload) || payload.ok !== false) {
+    return null;
+  }
+  if (!("message" in payload) || typeof payload.message !== "string" || payload.message.length === 0) {
+    return null;
+  }
+  return payload.message;
+}
 
 async function requestImageAnalysis(
   runId: string,

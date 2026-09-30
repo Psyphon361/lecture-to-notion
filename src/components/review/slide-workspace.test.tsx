@@ -15,6 +15,7 @@ import {
   stagesAfterOrganizeFailed,
   stagesAfterStructure,
   stagesAfterStructureStopped,
+  stagesWhileAnalyzing,
 } from "@/lib/pipeline/stages";
 import type { Presentation } from "@/lib/ppt/schema";
 
@@ -201,7 +202,67 @@ describe("review status", () => {
     );
     expect(container.querySelectorAll("ol li")).toHaveLength(4);
     expect(container.textContent).toContain("Extract slides");
+    expect(container.textContent).toContain("Opening the file.");
+    expect(container.textContent).not.toContain("Reading text and layout.");
     expect(container.textContent).toContain("Organize notes");
+    expect(container.querySelector("[role='progressbar']")).not.toBeNull();
+
+    const marks = [...container.querySelectorAll("ol li span[aria-label]")];
+    expect(marks.map((mark) => mark.getAttribute("aria-label"))).toEqual([
+      "In progress",
+      "Waiting",
+      "Waiting",
+      "Waiting",
+    ]);
+    expect(marks[0]?.textContent).toBe("●");
+    expect(marks[0]?.className).toContain("motion-safe:animate-pulse");
+    expect(marks[1]?.textContent).toBe("○");
+    expect(marks[1]?.className).not.toContain("animate-pulse");
+    expect(container.querySelector("ol li")?.className).toContain("bg-zinc-100");
+  });
+
+  it("starts image analysis on the first honest line", async () => {
+    const container = await render(
+      <ProcessingStatus
+        title="Analyzing images"
+        summary="Reading diagrams."
+        stages={stagesWhileAnalyzing()}
+      />,
+    );
+    expect(container.textContent).toContain("Skipping decorative images.");
+    expect(container.textContent).not.toContain("A picture deck takes longer.");
+    const marks = [...container.querySelectorAll("ol li span[aria-label]")];
+    expect(marks.map((mark) => mark.textContent)).toEqual(["✓", "●", "○", "○"]);
+    expect(marks[1]?.className).toContain("motion-safe:animate-pulse");
+    expect(marks[0]?.className).not.toContain("animate-pulse");
+  });
+
+  it("holds the first status line when motion is reduced", async () => {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("prefers-reduced-motion"),
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+
+    try {
+      const container = await render(
+        <ProcessingStatus
+          title="Extracting slides"
+          summary="Reading the file."
+          stages={initialStages()}
+        />,
+      );
+      expect(container.textContent).toContain("Opening the file.");
+      expect(container.textContent).not.toContain("Reading text and layout.");
+    } finally {
+      window.matchMedia = original;
+    }
   });
 });
 
