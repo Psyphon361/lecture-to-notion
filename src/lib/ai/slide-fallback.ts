@@ -10,6 +10,7 @@ const EMPTY_SLIDE_WARNING = "This slide had no text to keep.";
 /**
  * Notes from the slide itself when the model response cannot be used.
  * Native text keeps its bullet kind. Image readings become source or interpretation.
+ * A diagram, chart, equation, code image, or a reading with relationships keeps the stored picture.
  * A skipped image adds nothing.
  */
 export function fallbackSlideNotes(slide: Slide, outcomes: ImageOutcome[] = []): SlideNotes {
@@ -88,11 +89,14 @@ function appendElement(
     blocks.push({ type: "paragraph", content: element.text, provenance: "source" });
     return true;
   }
-  if (element.type === "image") return appendImage(readings.get(element.id), blocks, warnings);
+  if (element.type === "image") return appendImage(element, readings.get(element.id), blocks, warnings);
   return false;
 }
 
+const PICTURE_KINDS = new Set<NonNullable<ImageAnalysis["kind"]>>(["diagram", "chart", "equation", "code"]);
+
 function appendImage(
+  element: Extract<Slide["elements"][number], { type: "image" }>,
   outcome: ImageOutcome | undefined,
   blocks: NoteBlock[],
   warnings: string[],
@@ -102,22 +106,32 @@ function appendImage(
     warnings.push(outcome.warning);
     return true;
   }
-  return appendAnalysis(outcome.analysis, blocks, warnings);
+  return appendAnalysis(element.assetId, outcome.analysis, blocks, warnings);
 }
 
-function appendAnalysis(analysis: ImageAnalysis, blocks: NoteBlock[], warnings: string[]): boolean {
+function appendAnalysis(assetId: string, analysis: ImageAnalysis, blocks: NoteBlock[], warnings: string[]): boolean {
   let contributed = false;
   const extracted = written(analysis.extractedText);
+  const description = written(analysis.description);
+  const relationships = (analysis.relationships ?? []).map(written).filter((item): item is string => item !== undefined);
+  const picture = keepsPicture(analysis.kind, relationships);
+  if (picture) {
+    blocks.push({
+      type: "image",
+      assetId,
+      ...(description ? { caption: description } : {}),
+      provenance: "source",
+    });
+    contributed = true;
+  }
   if (extracted) {
     blocks.push({ type: "paragraph", content: extracted, provenance: "source" });
     contributed = true;
   }
-  const description = written(analysis.description);
-  if (description) {
+  if (description && !picture) {
     blocks.push({ type: "paragraph", content: description, provenance: "interpretation" });
     contributed = true;
   }
-  const relationships = (analysis.relationships ?? []).map(written).filter((item): item is string => item !== undefined);
   if (relationships.length > 0) {
     blocks.push({
       type: "bullets",
@@ -133,6 +147,10 @@ function appendAnalysis(analysis: ImageAnalysis, blocks: NoteBlock[], warnings: 
     contributed = true;
   }
   return contributed;
+}
+
+function keepsPicture(kind: ImageAnalysis["kind"], relationships: string[]): boolean {
+  return (kind !== undefined && PICTURE_KINDS.has(kind)) || relationships.length > 0;
 }
 
 function blocksFromParagraphs(paragraphs: TextParagraph[]): NoteBlock[] {

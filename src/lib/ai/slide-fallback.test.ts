@@ -107,12 +107,13 @@ describe("fallbackSlideNotes", () => {
     ]);
 
     expect(notes.blocks).toEqual([
-      { type: "paragraph", content: "BBALLB-203 recieve", provenance: "source" },
       {
-        type: "paragraph",
-        content: "A course code on the slide.",
-        provenance: "interpretation",
+        type: "image",
+        assetId: "run/secret-asset",
+        caption: "A course code on the slide.",
+        provenance: "source",
       },
+      { type: "paragraph", content: "BBALLB-203 recieve", provenance: "source" },
       {
         type: "bullets",
         provenance: "interpretation",
@@ -121,6 +122,45 @@ describe("fallbackSlideNotes", () => {
     ]);
     expect(notes.warnings).toEqual(["The last digit is faint."]);
     expect(notes.sourceReferences).toEqual([{ slideNumber: 3, elementId: "s3-img" }]);
+  });
+
+  it("keeps the stored picture when the reading is a diagram", () => {
+    const notes = fallbackSlideNotes(pictureSlide(), [
+      analyzed("s3-img", {
+        kind: "diagram",
+        extractedText: "Start",
+        description: "A three-step flow.",
+      }),
+    ]);
+
+    expect(notes.blocks).toEqual([
+      {
+        type: "image",
+        assetId: "run/secret-asset",
+        caption: "A three-step flow.",
+        provenance: "source",
+      },
+      { type: "paragraph", content: "Start", provenance: "source" },
+    ]);
+  });
+
+  it("keeps words only for a text image with no relationships", () => {
+    const notes = fallbackSlideNotes(pictureSlide(), [
+      analyzed("s3-img", {
+        kind: "text",
+        extractedText: "BBALLB-203 recieve",
+        description: "A course code on the slide.",
+      }),
+    ]);
+
+    expect(notes.blocks).toEqual([
+      { type: "paragraph", content: "BBALLB-203 recieve", provenance: "source" },
+      {
+        type: "paragraph",
+        content: "A course code on the slide.",
+        provenance: "interpretation",
+      },
+    ]);
   });
 
   it("adds no body text for a skipped decorative image", () => {
