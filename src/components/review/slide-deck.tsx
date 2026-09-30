@@ -58,7 +58,7 @@ export function SlideDeck({
             return (
               <div
                 key={sectionIndex}
-                className="h-full min-w-0 flex-[0_0_100%] overflow-y-auto overscroll-contain"
+                className="deck-scroll h-full min-w-0 flex-[0_0_100%] overflow-y-auto overscroll-contain"
                 data-deck-section=""
                 data-active={active ? "true" : "false"}
                 aria-hidden={active ? undefined : true}

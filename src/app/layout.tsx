@@ -31,8 +31,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="min-h-full flex flex-col">
-        <header className="flex justify-end px-6 py-4">
+      <body className="flex min-h-dvh flex-col">
+        <header className="flex justify-end px-6 py-2">
           <ThemeToggle />
         </header>
         {children}

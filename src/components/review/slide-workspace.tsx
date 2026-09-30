@@ -80,7 +80,7 @@ export function SlideWorkspace({
           count={slides.length}
           onIndexChange={setIndex}
         >
-          <div className="h-full overflow-y-auto overscroll-contain p-6">
+          <div className="deck-scroll h-full overflow-y-auto overscroll-contain p-6">
             {showingNotes ? (
               <NotePreview notes={notes} slides={slides} slideNumber={slide.slideNumber} />
             ) : (

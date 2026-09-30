@@ -163,7 +163,7 @@ export function LectureFlow() {
   if (flow.phase === "analyze-stopped") {
     const stopped = flow;
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+      <div className="mx-auto flex w-full flex-col gap-6">
         <button
           type="button"
           className="self-start text-sm font-medium underline"
@@ -204,7 +204,7 @@ export function LectureFlow() {
 
   if (flow.phase === "review") {
     return (
-      <div className="mx-auto flex h-[calc(100dvh-12.5rem)] w-full max-w-3xl flex-col gap-4 overflow-hidden">
+      <div className="mx-auto flex min-h-0 w-full flex-1 flex-col gap-3 overflow-hidden">
         <button
           type="button"
           className="self-start text-sm font-medium underline"
