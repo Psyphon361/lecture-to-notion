@@ -7,7 +7,7 @@ import { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { SlideDeck } from "@/components/review/slide-deck";
+import { contentFit, SlideDeck } from "@/components/review/slide-deck";
 import type { NoteDocument } from "@/lib/documents/schema";
 
 let root: Root | undefined;
@@ -18,6 +18,16 @@ afterEach(() => {
   });
   root = undefined;
   document.body.innerHTML = "";
+});
+
+describe("contentFit", () => {
+  it("leaves a short slide at full size", () => {
+    expect(contentFit(400, 180)).toEqual({ scale: 1, height: 180 });
+  });
+
+  it("shrinks a tall slide to the open pane", () => {
+    expect(contentFit(250, 500)).toEqual({ scale: 0.5, height: 250 });
+  });
 });
 
 describe("slide deck", () => {

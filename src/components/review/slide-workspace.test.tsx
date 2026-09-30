@@ -87,23 +87,15 @@ describe("slide workspace", () => {
     expect(container.textContent).not.toContain("Body 1");
   });
 
-  it("switches the open slide between notes and extracted text", async () => {
+  it("shows notes and does not offer an extracted tab", async () => {
     const container = await renderWorkspace(3);
     expect(container.textContent).toContain("Note 1");
     expect(container.textContent).not.toContain("Body 1");
     expect(container.textContent).not.toContain("What was extracted");
-    expect(container.textContent).not.toContain("Slide notes");
-
-    await click(container, "Slide 1 extracted");
-    expect(container.textContent).toContain("Body 1");
-    expect(container.textContent).not.toContain("Note 1");
-    expect(container.textContent).not.toContain("Body 2");
-    expect(container.textContent).not.toContain("Note 2");
-
-    await click(container, "Next slide");
-    expect(position(container)).toBe("2 / 3");
-    expect(container.textContent).toContain("Body 2");
-    expect(container.textContent).not.toContain("Body 1");
+    expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeNull();
+    expect(container.querySelector("[aria-label='Slide 1 extracted']")).toBeNull();
+    expect(buttonText(container, "Notes")).toBeNull();
+    expect(buttonText(container, "Extracted")).toBeNull();
   });
 
   it("ignores arrow keys while a text field is focused", async () => {
@@ -164,7 +156,7 @@ describe("review status", () => {
     expect(failed.textContent).toBe("Structured. Organization failed.");
   });
 
-  it("shows one document and keeps extracted slides one at a time", async () => {
+  it("shows one notes document one slide at a time", async () => {
     const container = await render(
       <SlideWorkspace
         presentation={deck(2)}
@@ -189,16 +181,8 @@ describe("review status", () => {
     expect(activeSection(container).textContent).toContain("Closing");
     expect(activeSection(container).textContent).toContain("Note 2");
     expect(activeSection(container).textContent).not.toContain("Note 1");
-
-    await click(container, "Slide 2 extracted");
-    expect(position(container)).toBe("2 / 2");
-    expect(container.textContent).toContain("Body 2");
-    expect(container.textContent).not.toContain("Body 1");
-    expect(container.textContent).not.toContain("Opening");
-
-    await click(container, "Slide 2 notes");
-    expect(position(container)).toBe("2 / 2");
-    expect(activeSection(container).textContent).toContain("Note 2");
+    expect(buttonText(container, "Notes")).toBeNull();
+    expect(buttonText(container, "Extracted")).toBeNull();
 
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
@@ -250,6 +234,11 @@ function activeSection(container: ParentNode): HTMLElement {
   const found = container.querySelector<HTMLElement>("[data-deck-section][data-active='true']");
   if (!found) throw new Error("Missing active section");
   return found;
+}
+
+function buttonText(container: ParentNode, label: string): HTMLButtonElement | null {
+  const found = [...container.querySelectorAll("button")].find((button) => button.textContent === label);
+  return found instanceof HTMLButtonElement ? found : null;
 }
 
 function button(container: ParentNode, label: string): HTMLButtonElement {

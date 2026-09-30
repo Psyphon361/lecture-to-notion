@@ -20,7 +20,9 @@
 }
 
 html {
-  zoom: 1.2;
+  --page-zoom: 1.1;
+  zoom: var(--page-zoom);
+  overflow: hidden;
 }
 
 body {

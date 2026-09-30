@@ -1,12 +1,20 @@
 "use client";
 
 import useEmblaCarousel from "embla-carousel-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { NoteBlocks } from "@/components/preview/note-preview";
 import type { NoteDocument } from "@/lib/documents/schema";
 
 const genericSlideHeading = /^Slide \d+$/;
+
+/** Shrink a slide so it fits the open pane. Leave shorter slides at full size. */
+export function contentFit(available: number, needed: number): { scale: number; height: number } {
+  if (available <= 0 || needed <= 0) return { scale: 1, height: Math.max(needed, 0) };
+  const scale = Math.min(1, available / needed);
+  const height = Math.min(available, Math.ceil(needed * scale - 1e-6));
+  return { scale, height };
+}
 
 export function cardTitle(heading: string | undefined): string | undefined {
   const trimmed = heading?.trim();
@@ -50,20 +58,24 @@ export function SlideDeck({
 
   return (
     <SlideFrame filename={filename} index={index} count={count} onIndexChange={onIndexChange}>
-      <div className="h-full min-h-0 overflow-hidden" ref={emblaRef}>
-        <div className="flex h-full">
+      <div className="overflow-hidden" ref={emblaRef}>
+        <div className="flex items-start">
           {document.sections.map((section, sectionIndex) => {
             const title = cardTitle(section.heading);
             const active = sectionIndex === index;
             return (
               <div
                 key={sectionIndex}
-                className="deck-scroll h-full min-w-0 flex-[0_0_100%] overflow-y-auto overscroll-contain"
+                className={
+                  active
+                    ? "min-w-0 flex-[0_0_100%]"
+                    : "h-0 min-h-0 min-w-0 flex-[0_0_100%] overflow-hidden"
+                }
                 data-deck-section=""
                 data-active={active ? "true" : "false"}
                 aria-hidden={active ? undefined : true}
               >
-                <div className="flex min-h-full flex-col justify-center gap-4 px-6 py-8">
+                <div className="flex flex-col gap-4 px-6 py-8">
                   {title ? <h2 className="text-2xl font-semibold">{title}</h2> : null}
                   <NoteBlocks blocks={section.blocks} />
                 </div>
@@ -104,9 +116,33 @@ export function SlideFrame({
 
   const position = count === 0 ? 0 : index + 1;
   const progress = count === 0 ? 0 : (position / count) * 100;
+  const paneRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState({ scale: 1, height: 0 });
+
+  useLayoutEffect(() => {
+    const pane = paneRef.current;
+    const content = contentRef.current;
+    if (!pane || !content) return;
+
+    const measure = () => {
+      const next = contentFit(pane.clientHeight, content.scrollHeight);
+      setFit((current) =>
+        current.scale === next.scale && current.height === next.height ? current : next,
+      );
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [index]);
+
+  const scaled = fit.scale < 1;
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-hidden">
       <p className="truncate text-sm text-zinc-500">{filename}</p>
       <div className="flex items-center gap-3">
         <button
@@ -141,8 +177,21 @@ export function SlideFrame({
       >
         <div className="h-full bg-zinc-900 dark:bg-zinc-100" style={{ width: `${progress}%` }} />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-        {children}
+      <div ref={paneRef} className="min-h-0 flex-1 overflow-hidden">
+        <div
+          className="w-full overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+          style={fit.height > 0 ? { height: fit.height } : undefined}
+        >
+          <div
+            style={
+              scaled
+                ? { transform: `scale(${fit.scale})`, transformOrigin: "top center" }
+                : undefined
+            }
+          >
+            <div ref={contentRef}>{children}</div>
+          </div>
+        </div>
       </div>
     </div>
   );

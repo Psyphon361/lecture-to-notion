@@ -119,12 +119,10 @@ describe("lecture flow", () => {
     expect(container.querySelector("a[href='#note-section-0']")).toBeNull();
     expect(container.querySelector("a[href='#note-section-1']")).toBeNull();
     expect(container.textContent).toContain("1 / 2");
-    expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeTruthy();
+    expect(container.querySelector("[aria-label='Slide 1 notes']")).toBeNull();
+    expect(container.querySelector("[aria-label='Slide 1 extracted']")).toBeNull();
+    expect(textButtonOrNull(container, "Extracted")).toBeNull();
     expect(container.textContent).not.toContain("Export to Notion");
-
-    await clickText(container, "Extracted");
-    expect(container.textContent).toContain("1 / 2");
-    expect(container.textContent).toContain("Body 1");
 
     const parses = calls.filter((call) => call.url.endsWith("/api/parse"));
     const analyses = calls.filter((call) => call.url.endsWith("/api/analyze-images"));
@@ -277,9 +275,14 @@ async function clickText(container: ParentNode, label: string) {
   await settle();
 }
 
-function textButton(container: ParentNode, label: string): HTMLButtonElement {
+function textButtonOrNull(container: ParentNode, label: string): HTMLButtonElement | null {
   const found = [...container.querySelectorAll("button")].find((button) => button.textContent === label);
-  if (!(found instanceof HTMLButtonElement)) throw new Error(`Missing button ${label}`);
+  return found instanceof HTMLButtonElement ? found : null;
+}
+
+function textButton(container: ParentNode, label: string): HTMLButtonElement {
+  const found = textButtonOrNull(container, label);
+  if (!found) throw new Error(`Missing button ${label}`);
   return found;
 }
 
