@@ -6,7 +6,9 @@ describe("imageAnalysisPrompt", () => {
   it("asks the model to skip crests and institution banners", () => {
     const prompt = imageAnalysisPrompt();
 
-    expect(PROMPT_VERSION).toBe("image-analysis-v3");
+    expect(PROMPT_VERSION).toBe("image-analysis-v5");
+    expect(prompt).toContain("Do not mention spelling");
+    expect(prompt).toContain("designed lecture slide");
     expect(prompt).toContain("college crest");
     expect(prompt).toContain("institution name banner");
     expect(prompt).toContain("running header");

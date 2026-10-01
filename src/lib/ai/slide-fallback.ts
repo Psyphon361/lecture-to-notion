@@ -10,8 +10,8 @@ const EMPTY_SLIDE_WARNING = "This slide had no text to keep.";
 /**
  * Notes from the slide itself when the model response cannot be used.
  * Native text keeps its bullet kind. Image readings become source or interpretation.
- * A diagram, chart, equation, code image, or a reading with relationships keeps the stored picture.
- * A skipped image adds nothing.
+ * A diagram, chart, equation, code image, screenshot of a designed slide, or a reading with relationships keeps the stored picture.
+ * A plain quote or photo stays words. A skipped image adds nothing.
  */
 export function fallbackSlideNotes(slide: Slide, outcomes: ImageOutcome[] = []): SlideNotes {
   const readings = readingsForSlide(slide, outcomes);
@@ -20,7 +20,6 @@ export function fallbackSlideNotes(slide: Slide, outcomes: ImageOutcome[] = []):
   const sourceReferences: SlideNotes["sourceReferences"] = [];
   let title: string | undefined;
   let usedTitle = false;
-  const pictureOnlySlide = isPictureOnlySlide(slide);
 
   for (const element of elementsInReadingOrder(slide.elements)) {
     if (element.type === "text" && element.isTitle && !usedTitle) {
@@ -33,7 +32,7 @@ export function fallbackSlideNotes(slide: Slide, outcomes: ImageOutcome[] = []):
       }
     }
 
-    const contributed = appendElement(element, readings, blocks, warnings, pictureOnlySlide, (imageTitle) => {
+    const contributed = appendElement(element, readings, blocks, warnings, (imageTitle) => {
       if (!usedTitle && imageTitle) {
         title = imageTitle;
         usedTitle = true;
@@ -79,7 +78,6 @@ function appendElement(
   readings: Map<string, ImageOutcome>,
   blocks: NoteBlock[],
   warnings: string[],
-  pictureOnlySlide: boolean,
   onImageTitle: (title: string) => void,
 ): boolean {
   if (element.type === "text") {
@@ -98,19 +96,24 @@ function appendElement(
     return true;
   }
   if (element.type === "image") {
-    return appendImage(element, readings.get(element.id), blocks, warnings, pictureOnlySlide, onImageTitle);
+    return appendImage(element, readings.get(element.id), blocks, warnings, onImageTitle);
   }
   return false;
 }
 
-const PICTURE_KINDS = new Set<NonNullable<ImageAnalysis["kind"]>>(["diagram", "chart", "equation", "code"]);
+const PICTURE_KINDS = new Set<NonNullable<ImageAnalysis["kind"]>>([
+  "diagram",
+  "chart",
+  "equation",
+  "code",
+  "screenshot",
+]);
 
 function appendImage(
   element: Extract<Slide["elements"][number], { type: "image" }>,
   outcome: ImageOutcome | undefined,
   blocks: NoteBlock[],
   warnings: string[],
-  pictureOnlySlide: boolean,
   onImageTitle: (title: string) => void,
 ): boolean {
   if (!outcome || outcome.status === "skipped") return false;
@@ -118,7 +121,7 @@ function appendImage(
     warnings.push(outcome.warning);
     return true;
   }
-  return appendAnalysis(element.assetId, outcome.analysis, blocks, warnings, pictureOnlySlide, onImageTitle);
+  return appendAnalysis(element.assetId, outcome.analysis, blocks, warnings, onImageTitle);
 }
 
 function appendAnalysis(
@@ -126,7 +129,6 @@ function appendAnalysis(
   analysis: ImageAnalysis,
   blocks: NoteBlock[],
   warnings: string[],
-  pictureOnlySlide: boolean,
   onImageTitle: (title: string) => void,
 ): boolean {
   let contributed = false;
@@ -134,27 +136,27 @@ function appendAnalysis(
   const description = written(analysis.description);
   const relationships = (analysis.relationships ?? []).map(written).filter((item): item is string => item !== undefined);
   const structuredLines = structuredImageLines(analysis.lines);
-  const picture = keepsPicture(analysis.kind, relationships, pictureOnlySlide);
+  const picture = keepsPicture(analysis.kind, relationships);
   if (picture) {
     blocks.push({ type: "image", assetId, provenance: "source" });
     contributed = true;
-    if (structuredLines) {
-      const imageTitle = titleFromStructuredLines(structuredLines);
-      if (imageTitle) onImageTitle(imageTitle);
-    }
     for (const uncertainty of analysis.uncertainties ?? []) {
-      const warning = written(uncertainty);
+      const warning = noteUncertainty(uncertainty);
       if (!warning) continue;
       warnings.push(warning);
       contributed = true;
     }
     return contributed;
   }
-  if (extracted && !picture) {
+  if (structuredLines) {
+    const imageTitle = appendStructuredLines(structuredLines, blocks);
+    if (imageTitle) onImageTitle(imageTitle);
+    contributed = true;
+  } else if (extracted) {
     blocks.push({ type: "paragraph", content: extracted, provenance: "source" });
     contributed = true;
   }
-  if (description && (!picture || relationships.length === 0)) {
+  if (description && !isSpellingNote(description) && !structuredLines && !extracted && (!picture || relationships.length === 0)) {
     blocks.push({ type: "paragraph", content: description, provenance: "interpretation" });
     contributed = true;
   }
@@ -167,7 +169,7 @@ function appendAnalysis(
     contributed = true;
   }
   for (const uncertainty of analysis.uncertainties ?? []) {
-    const warning = written(uncertainty);
+    const warning = noteUncertainty(uncertainty);
     if (!warning) continue;
     warnings.push(warning);
     contributed = true;
@@ -175,28 +177,8 @@ function appendAnalysis(
   return contributed;
 }
 
-function keepsPicture(
-  kind: ImageAnalysis["kind"],
-  relationships: string[],
-  pictureOnlySlide: boolean,
-): boolean {
-  if (pictureOnlySlide) return true;
+function keepsPicture(kind: ImageAnalysis["kind"], relationships: string[]): boolean {
   return (kind !== undefined && PICTURE_KINDS.has(kind)) || relationships.length > 0;
-}
-
-function isPictureOnlySlide(slide: Slide): boolean {
-  const images = slide.elements.filter((element) => element.type === "image");
-  if (images.length !== 1) return false;
-  for (const element of slide.elements) {
-    if (element.type === "image") continue;
-    if (element.type === "text") {
-      if (element.paragraphs.some((paragraph) => written(paragraph.text))) return false;
-      continue;
-    }
-    if (element.type === "table" && element.rows.length > 0) return false;
-    if (element.type === "shape" && written(element.text)) return false;
-  }
-  return true;
 }
 
 function structuredImageLines(
@@ -214,6 +196,38 @@ function titleFromStructuredLines(lines: NonNullable<ImageAnalysis["lines"]>): s
     if (text) return text;
   }
   return undefined;
+}
+
+function appendStructuredLines(lines: NonNullable<ImageAnalysis["lines"]>, blocks: NoteBlock[]): string | undefined {
+  const imageTitle = titleFromStructuredLines(lines);
+  const body: string[] = [];
+  const flushBody = () => {
+    if (body.length === 0) return;
+    blocks.push({ type: "paragraph", content: body.join(" "), provenance: "source" });
+    body.length = 0;
+  };
+  for (const line of lines) {
+    const text = written(line.text);
+    if (!text || line.role === "title") continue;
+    if (line.role === "body" && !isAttribution(text)) {
+      body.push(text);
+      continue;
+    }
+    flushBody();
+    if (isAttribution(text) || line.role === "callout") {
+      blocks.push({ type: "paragraph", content: text, provenance: "source" });
+      continue;
+    }
+    if (line.role === "heading") {
+      blocks.push({ type: "heading", content: text, level: 2, provenance: "source" });
+    }
+  }
+  flushBody();
+  return imageTitle;
+}
+
+function isAttribution(text: string): boolean {
+  return /^[—–-]\s*\S/.test(text.trim());
 }
 
 function blocksFromParagraphs(paragraphs: TextParagraph[]): NoteBlock[] {
@@ -283,4 +297,14 @@ function titleFrom(paragraphs: TextParagraph[]): string | undefined {
 function written(value: string | undefined): string | undefined {
   if (!value || value.trim().length === 0) return undefined;
   return value;
+}
+
+function noteUncertainty(value: string): string | undefined {
+  const warning = written(value);
+  if (!warning || isSpellingNote(warning)) return undefined;
+  return warning;
+}
+
+function isSpellingNote(value: string): boolean {
+  return /\b(typos?|misspell\w*|spellings?|spelled|spelt)\b/i.test(value);
 }

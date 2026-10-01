@@ -53,7 +53,7 @@ export const imageAnalysisModelSchema = z.object({
   uncertainties: z
     .array(z.string())
     .optional()
-    .describe("Spots that could not be read, or claims that are unsure."),
+    .describe("Spots that could not be read, or claims that are unsure. Do not include spelling or typos."),
 });
 
 export const imageAnalysisSchema = imageAnalysisModelSchema.extend({

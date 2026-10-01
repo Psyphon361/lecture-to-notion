@@ -160,7 +160,59 @@ describe("fallbackSlideNotes", () => {
     ]);
   });
 
-  it("keeps a picture-only slide image without a flat extractedText paragraph", () => {
+  it("joins a wrapped quote into one paragraph and keeps the attribution", () => {
+    const notes = fallbackSlideNotes(pictureSlide(), [
+      analyzed("s3-img", {
+        kind: "text",
+        description: "A quote on a red background by Justice Krishna Iyer.",
+        lines: [
+          { role: "body", text: "It is the weakness" },
+          { role: "body", text: "of our jurisprudence" },
+          { role: "body", text: "that victims of crime" },
+          { role: "heading", text: "— Justice Krishna Iyer" },
+          {
+            role: "callout",
+            text: "This early judicial critique acted as the catalyst for aggressive legal reform in India.",
+          },
+        ],
+      }),
+    ]);
+
+    expect(notes.blocks).toEqual([
+      {
+        type: "paragraph",
+        content: "It is the weakness of our jurisprudence that victims of crime",
+        provenance: "source",
+      },
+      { type: "paragraph", content: "— Justice Krishna Iyer", provenance: "source" },
+      {
+        type: "paragraph",
+        content: "This early judicial critique acted as the catalyst for aggressive legal reform in India.",
+        provenance: "source",
+      },
+    ]);
+    expect(JSON.stringify(notes)).not.toContain("red background");
+  });
+
+  it("keeps a designed slide screenshot and does not repeat its text", () => {
+    const notes = fallbackSlideNotes(pictureSlide(), [
+      analyzed("s3-img", {
+        kind: "screenshot",
+        extractedText: "Section 357 CrPC",
+        description: "A lecture slide comparing two statutory mechanisms.",
+        lines: [{ role: "title", text: "Course Outcomes & Syllabus Integration" }],
+      }),
+    ]);
+
+    expect(notes.blocks).toEqual([
+      { type: "image", assetId: "run/secret-asset", provenance: "source" },
+    ]);
+    expect(notes.title).toBeUndefined();
+    expect(JSON.stringify(notes)).not.toContain("Section 357 CrPC");
+    expect(JSON.stringify(notes)).not.toContain("Course Outcomes");
+  });
+
+  it("keeps a plain quote as text and drops the image", () => {
     const notes = fallbackSlideNotes(pictureSlide(), [
       analyzed("s3-img", {
         kind: "text",
@@ -170,9 +222,25 @@ describe("fallbackSlideNotes", () => {
     ]);
 
     expect(notes.blocks).toEqual([
-      { type: "image", assetId: "run/secret-asset", provenance: "source" },
+      { type: "paragraph", content: "BBALLB-203 recieve", provenance: "source" },
     ]);
-    expect(JSON.stringify(notes)).not.toContain("BBALLB-203 recieve");
+    expect(JSON.stringify(notes)).not.toContain("run/secret-asset");
+  });
+
+  it("keeps a misspelling and drops a spelling warning", () => {
+    const notes = fallbackSlideNotes(pictureSlide(), [
+      analyzed("s3-img", {
+        kind: "text",
+        extractedText: "recieve",
+        description: "Possible typo for receive.",
+        uncertainties: ["Misspelling of receive.", "The last digit is faint."],
+      }),
+    ]);
+
+    expect(notes.blocks).toEqual([
+      { type: "paragraph", content: "recieve", provenance: "source" },
+    ]);
+    expect(notes.warnings).toEqual(["The last digit is faint."]);
   });
 
   it("maps image lines to the slide title, headings, body, and callout", () => {
@@ -192,26 +260,31 @@ describe("fallbackSlideNotes", () => {
 
     expect(notes.title).toBe("Victim Compensation");
     expect(notes.blocks).toEqual([
-      { type: "image", assetId: "run/secret-asset", provenance: "source" },
+      { type: "heading", content: "Section 357 CrPC", level: 2, provenance: "source" },
+      {
+        type: "paragraph",
+        content: "Compensation may be ordered at the time of sentencing.",
+        provenance: "source",
+      },
+      { type: "paragraph", content: "Historical Flaw", provenance: "source" },
     ]);
     expect(JSON.stringify(notes)).not.toContain("flat blob");
-    expect(JSON.stringify(notes)).not.toContain("Section 357 CrPC");
-    expect(JSON.stringify(notes)).not.toContain("Historical Flaw");
     expect(JSON.stringify(notes)).not.toContain("Overall layout of the infographic.");
+    expect(JSON.stringify(notes)).not.toContain("run/secret-asset");
   });
 
-  it("keeps a picture-only image when lines are missing", () => {
+  it("keeps a photo quote as text when it is not a diagram", () => {
     const notes = fallbackSlideNotes(pictureSlide(), [
       analyzed("s3-img", {
         kind: "photo",
-        extractedText: "Should not become one paragraph",
+        extractedText: "A sentence from the slide.",
       }),
     ]);
 
     expect(notes.blocks).toEqual([
-      { type: "image", assetId: "run/secret-asset", provenance: "source" },
+      { type: "paragraph", content: "A sentence from the slide.", provenance: "source" },
     ]);
-    expect(JSON.stringify(notes)).not.toContain("Should not become one paragraph");
+    expect(JSON.stringify(notes)).not.toContain("run/secret-asset");
   });
 
   it("adds no body text for a skipped decorative image", () => {
