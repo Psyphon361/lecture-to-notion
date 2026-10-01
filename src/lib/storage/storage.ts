@@ -60,8 +60,9 @@ export function sha256Hex(body: Uint8Array): string {
   return createHash("sha256").update(body).digest("hex");
 }
 
-/** Project-local root. Already listed in `.gitignore`. */
+/** Project-local root. On Vercel the project directory is read-only, so runs go under /tmp. */
 export function defaultStorageRoot(): string {
+  if (process.env.VERCEL) return "/tmp/lecture-notes";
   return path.join(process.cwd(), ".data");
 }
 
@@ -86,12 +87,12 @@ export function createLocalStorage(rootDir = defaultStorageRoot()): Storage {
         byteLength: bytes.byteLength,
         storedAt: new Date().toISOString(),
       };
-      await mkdir(located.dir, { recursive: true });
-      await writeFile(located.file, bytes);
+      await mkdir(/* turbopackIgnore: true */ located.dir, { recursive: true });
+      await writeFile(/* turbopackIgnore: true */ located.file, bytes);
       try {
-        await writeFile(located.meta, `${JSON.stringify(meta)}\n`, "utf8");
+        await writeFile(/* turbopackIgnore: true */ located.meta, `${JSON.stringify(meta)}\n`, "utf8");
       } catch (error) {
-        await rm(located.file, { force: true });
+        await rm(/* turbopackIgnore: true */ located.file, { force: true });
         throw error;
       }
 
@@ -101,7 +102,7 @@ export function createLocalStorage(rootDir = defaultStorageRoot()): Storage {
     async get(key) {
       const located = locate(root, key);
       try {
-        return new Uint8Array(await readFile(located.file));
+        return new Uint8Array(await readFile(/* turbopackIgnore: true */ located.file));
       } catch (error) {
         if (isCode(error, "ENOENT")) return null;
         throw error;
@@ -112,7 +113,7 @@ export function createLocalStorage(rootDir = defaultStorageRoot()): Storage {
       const located = locate(root, key);
       let info;
       try {
-        info = await statFile(located.file);
+        info = await statFile(/* turbopackIgnore: true */ located.file);
       } catch (error) {
         if (isCode(error, "ENOENT")) return null;
         throw error;
@@ -121,7 +122,7 @@ export function createLocalStorage(rootDir = defaultStorageRoot()): Storage {
 
       let raw: string;
       try {
-        raw = await readFile(located.meta, "utf8");
+        raw = await readFile(/* turbopackIgnore: true */ located.meta, "utf8");
       } catch (error) {
         if (isCode(error, "ENOENT")) return null;
         throw error;
@@ -136,8 +137,8 @@ export function createLocalStorage(rootDir = defaultStorageRoot()): Storage {
 
     async delete(key) {
       const located = locate(root, key);
-      await rm(located.file, { force: true });
-      await rm(located.meta, { force: true });
+      await rm(/* turbopackIgnore: true */ located.file, { force: true });
+      await rm(/* turbopackIgnore: true */ located.meta, { force: true });
       await removeDirIfEmpty(located.dir);
     },
   };
@@ -155,7 +156,7 @@ export async function purgeExpiredRuns(
   const runsDir = path.join(path.resolve(rootDir), "runs");
   let names: string[];
   try {
-    names = await readdir(runsDir);
+    names = await readdir(/* turbopackIgnore: true */ runsDir);
   } catch (error) {
     if (isCode(error, "ENOENT")) return 0;
     throw error;
@@ -167,14 +168,14 @@ export async function purgeExpiredRuns(
     const dir = path.join(runsDir, name);
     let info;
     try {
-      info = await statFile(dir);
+      info = await statFile(/* turbopackIgnore: true */ dir);
     } catch (error) {
       if (isCode(error, "ENOENT")) continue;
       throw error;
     }
     if (!info.isDirectory()) continue;
     if (now - info.mtimeMs < maxAgeMs) continue;
-    await rm(dir, { recursive: true, force: true });
+    await rm(/* turbopackIgnore: true */ dir, { recursive: true, force: true });
     removed += 1;
   }
   return removed;
@@ -239,7 +240,7 @@ function readMeta(raw: string): AssetMeta {
 
 async function removeDirIfEmpty(dir: string): Promise<void> {
   try {
-    await rmdir(dir);
+    await rmdir(/* turbopackIgnore: true */ dir);
   } catch (error) {
     if (isCode(error, "ENOENT") || isCode(error, "ENOTEMPTY")) return;
     throw error;
