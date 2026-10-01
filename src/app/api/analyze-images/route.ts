@@ -2,9 +2,11 @@ import { analyzeImageSet } from "@/lib/ai/analyze-images";
 import {
   analyzeFailureSchema,
   analyzeImagesRequestSchema,
+  analyzeRateLimitedSchema,
   analyzeSuccessSchema,
+  RATE_LIMIT_RETRY_MS,
 } from "@/lib/ai/analyze-response";
-import { analyzeErrorResponse, analyzeImageWithGemini } from "@/lib/ai/gemini";
+import { analyzeErrorResponse, analyzeImageWithGemini, GeminiCallError } from "@/lib/ai/gemini";
 import type { ImageInput } from "@/lib/ai/provider";
 import type { ImageAnalysis } from "@/lib/ai/schema";
 import { createLocalStorage, imageAssetKey, type Storage } from "@/lib/storage/storage";
@@ -47,11 +49,24 @@ export async function handleAnalyzeImages(
   }
 
   try {
-    const outcomes = await analyzeImageSet(parsed.data.images, {
+    const result = await analyzeImageSet(parsed.data.images, {
       readAsset: (assetId) => readStoredImage(storage, assetId),
       analyze,
     });
-    return Response.json(analyzeSuccessSchema.parse({ ok: true, outcomes }));
+    if (result.rateLimited) {
+      const message = analyzeErrorResponse(new GeminiCallError(429)).message;
+      console.info("image-analysis outcome=rate-limited status=429");
+      return Response.json(
+        analyzeRateLimitedSchema.parse({
+          ok: false,
+          message,
+          retryAfterMs: RATE_LIMIT_RETRY_MS,
+          outcomes: result.outcomes,
+        }),
+        { status: 429 },
+      );
+    }
+    return Response.json(analyzeSuccessSchema.parse({ ok: true, outcomes: result.outcomes }));
   } catch (error) {
     const mapped = analyzeErrorResponse(error);
     console.info(`image-analysis outcome=request-error status=${mapped.status}`);

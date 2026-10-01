@@ -136,6 +136,27 @@ describe("mapNoteDocument", () => {
     expect(mapped.blocks[0]?.type).toBe("heading_2");
   });
 
+  it("maps an in-slide heading block to heading_2", () => {
+    const mapped = mapNoteDocument({
+      title: "Notes",
+      sections: [
+        {
+          blocks: [
+            { type: "heading", content: "Stage 3", level: 2, provenance: "source" },
+            {
+              type: "bullets",
+              provenance: "source",
+              items: [{ text: "Option A" }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(mapped.blocks.map((block) => block.type)).toEqual(["heading_2", "bulleted_list_item"]);
+    const heading = body(mapped.blocks[0]!, "heading_2");
+    expect(heading.rich_text).toEqual([{ type: "text", text: { content: "Stage 3" } }]);
+  });
+
   it("turns an unknown code language into plain text", () => {
     expect(notionLanguage("Python")).toBe("python");
     expect(notionLanguage("ts")).toBe("typescript");

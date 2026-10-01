@@ -33,6 +33,79 @@ describe("parsePptx", () => {
     );
   });
 
+  it("reads list-style bullets and fully bold paragraphs", async () => {
+    const result = await parsePptx({
+      filename: "formatting.pptx",
+      bytes: await formattingPptx(),
+      id: "formatting",
+    });
+
+    const slide = result.presentation.slides[0];
+    const inheritedBullet = slide?.elements.find(
+      (element) => element.type === "text" && elementText(element) === "Styled bullet",
+    );
+    expect(inheritedBullet?.type).toBe("text");
+    if (inheritedBullet?.type !== "text") return;
+    expect(inheritedBullet.paragraphs).toEqual([
+      { text: "Styled bullet", level: 0, bullet: "bullet" },
+    ] satisfies TextParagraph[]);
+
+    const plainFromStyle = slide?.elements.find(
+      (element) => element.type === "text" && elementText(element) === "Plain from buNone",
+    );
+    expect(plainFromStyle?.type).toBe("text");
+    if (plainFromStyle?.type !== "text") return;
+    expect(plainFromStyle.paragraphs).toEqual([
+      { text: "Plain from buNone", level: 0, bullet: "none" },
+    ] satisfies TextParagraph[]);
+
+    const boldLines = slide?.elements.find(
+      (element) => element.type === "text" && elementText(element).includes("Stage 3"),
+    );
+    expect(boldLines?.type).toBe("text");
+    if (boldLines?.type !== "text") return;
+    expect(boldLines.paragraphs).toEqual([
+      { text: "Stage 3: Considering the alternatives", level: 0, bold: true },
+      { text: "Bold and plain", level: 0 },
+    ] satisfies TextParagraph[]);
+
+    const explicitNone = slide?.elements.find(
+      (element) => element.type === "text" && elementText(element) === "Explicit buNone",
+    );
+    expect(explicitNone?.type).toBe("text");
+    if (explicitNone?.type !== "text") return;
+    expect(explicitNone.paragraphs).toEqual([
+      { text: "Explicit buNone", level: 0, bullet: "none" },
+    ] satisfies TextParagraph[]);
+  });
+
+  it("inherits bullets from slide master txStyles when shape list style is empty", async () => {
+    const result = await parsePptx({
+      filename: "master-bullets.pptx",
+      bytes: await masterBulletPptx(),
+      id: "master-bullets",
+    });
+
+    const slide = result.presentation.slides[0];
+    const fromMaster = slide?.elements.find(
+      (element) => element.type === "text" && elementText(element) === "Master bullet",
+    );
+    expect(fromMaster?.type).toBe("text");
+    if (fromMaster?.type !== "text") return;
+    expect(fromMaster.paragraphs).toEqual([
+      { text: "Master bullet", level: 0, bullet: "bullet" },
+    ] satisfies TextParagraph[]);
+
+    const explicitNone = slide?.elements.find(
+      (element) => element.type === "text" && elementText(element) === "Master buNone wins",
+    );
+    expect(explicitNone?.type).toBe("text");
+    if (explicitNone?.type !== "text") return;
+    expect(explicitNone.paragraphs).toEqual([
+      { text: "Master buNone wins", level: 0, bullet: "none" },
+    ] satisfies TextParagraph[]);
+  });
+
   it("keeps presentation order, lists, pictures, notes, and a group", async () => {
     const result = await parsePptx({
       filename: " lecture.pptx ",
@@ -205,6 +278,51 @@ describe("parsePptx", () => {
       expect(slide6?.type === "text" && slide6.paragraphs[0]?.text).toBe(
         "5 important stages of the consumer decision-making process\n",
       );
+
+      const slide7 = slides[6]?.elements.find(
+        (element) =>
+          element.type === "text" &&
+          element.paragraphs.some((paragraph) =>
+            paragraph.text.startsWith("Stage 3: Considering the alternatives"),
+          ),
+      );
+      expect(slide7?.type).toBe("text");
+      if (slide7?.type === "text") {
+        expect(slide7.paragraphs).toEqual([
+          {
+            text: "Stage 3: Considering the alternatives",
+            level: 0,
+            bullet: "none",
+            bold: true,
+          },
+          {
+            text: "At this stage, the consumer compares options based on price, product quality, quantity, value-added features, or other essential factors. Before choosing the product that best meets your needs, look at customer reviews and compare prices for the alternatives. ",
+            level: 0,
+            bullet: "bullet",
+          },
+          {
+            text: "After finding helpful information, the consumer chooses the best product on the market based on their taste, style, income, or preference.",
+            level: 0,
+            bullet: "bullet",
+          },
+          {
+            text: "Stage 4: Buying the product or service",
+            level: 0,
+            bullet: "none",
+            bold: true,
+          },
+          {
+            text: "the customer decides what to buy and where to buy it. The consumer makes a smart choice to buy a product based on his needs and wants after he has looked at all the facts.",
+            level: 0,
+            bullet: "bullet",
+          },
+          {
+            text: "Needs and wants are often sparked by marketing campaigns, recommendations from friends and family, or sometimes by both.",
+            level: 0,
+            bullet: "bullet",
+          },
+        ] satisfies TextParagraph[]);
+      }
 
       const numbered = slides[10]?.elements.flatMap((element) =>
         element.type === "text"
@@ -573,6 +691,7 @@ function textShape(input: {
   y: number;
   cx: number;
   cy: number;
+  lstStyle?: string;
   paragraphs: string;
 }): string {
   const placeholder = input.ph
@@ -589,8 +708,243 @@ function textShape(input: {
     </p:spPr>
     <p:txBody>
       <a:bodyPr/>
-      <a:lstStyle/>
+      <a:lstStyle>${input.lstStyle ?? ""}</a:lstStyle>
       ${input.paragraphs}
     </p:txBody>
   </p:sp>`;
+}
+
+async function formattingPptx(): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>`,
+  );
+  zip.file(
+    "_rels/.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>`,
+  );
+  zip.file(
+    "ppt/presentation.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation ${NS}>
+  <p:sldIdLst>
+    <p:sldId id="256" r:id="rId1"/>
+  </p:sldIdLst>
+  <p:sldSz cx="9144000" cy="6858000"/>
+</p:presentation>`,
+  );
+  zip.file(
+    "ppt/_rels/presentation.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>`,
+  );
+  zip.file(
+    "ppt/slides/slide1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld ${NS}>
+  <p:cSld>
+    <p:spTree>
+      <p:nvGrpSpPr>
+        <p:cNvPr id="1" name=""/>
+        <p:cNvGrpSpPr/>
+        <p:nvPr/>
+      </p:nvGrpSpPr>
+      <p:grpSpPr/>
+      ${textShape({
+        id: 2,
+        name: "Inherited bullet",
+        x: 1,
+        y: 2,
+        cx: 3,
+        cy: 4,
+        lstStyle: `<a:lvl1pPr><a:buChar char="▪"/></a:lvl1pPr>`,
+        paragraphs: `<a:p><a:r><a:t>Styled bullet</a:t></a:r></a:p>`,
+      })}
+      ${textShape({
+        id: 3,
+        name: "Plain list style",
+        x: 1,
+        y: 2,
+        cx: 3,
+        cy: 4,
+        lstStyle: `<a:lvl1pPr><a:buNone/></a:lvl1pPr>`,
+        paragraphs: `<a:p><a:r><a:t>Plain from buNone</a:t></a:r></a:p>`,
+      })}
+      ${textShape({
+        id: 4,
+        name: "Bold body",
+        x: 1,
+        y: 2,
+        cx: 3,
+        cy: 4,
+        paragraphs: `<a:p><a:r><a:rPr b="1"/><a:t>Stage 3: Considering the alternatives</a:t></a:r></a:p>
+          <a:p><a:r><a:rPr b="1"/><a:t>Bold</a:t></a:r><a:r><a:t> and plain</a:t></a:r></a:p>`,
+      })}
+      ${textShape({
+        id: 5,
+        name: "Explicit buNone",
+        x: 1,
+        y: 2,
+        cx: 3,
+        cy: 4,
+        lstStyle: `<a:lvl1pPr><a:buChar char="▪"/></a:lvl1pPr>`,
+        paragraphs: `<a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>Explicit buNone</a:t></a:r></a:p>`,
+      })}
+    </p:spTree>
+  </p:cSld>
+</p:sld>`,
+  );
+  zip.file("ppt/slides/_rels/slide1.xml.rels", emptyRels());
+  return zip.generateAsync({ type: "uint8array" });
+}
+
+async function masterBulletPptx(): Promise<Uint8Array> {
+  const zip = new JSZip();
+  zip.file(
+    "[Content_Types].xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+  <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
+  <Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
+  <Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+</Types>`,
+  );
+  zip.file(
+    "_rels/.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>`,
+  );
+  zip.file(
+    "ppt/presentation.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation ${NS}>
+  <p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
+  <p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst>
+  <p:sldSz cx="9144000" cy="6858000"/>
+</p:presentation>`,
+  );
+  zip.file(
+    "ppt/_rels/presentation.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>`,
+  );
+  zip.file(
+    "ppt/theme/theme1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme">
+  <a:themeElements>
+    <a:clrScheme name="Office"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="44546A"/></a:dk2><a:lt2><a:srgbClr val="E7E6E6"/></a:lt2><a:accent1><a:srgbClr val="4472C4"/></a:accent1><a:accent2><a:srgbClr val="ED7D31"/></a:accent2><a:accent3><a:srgbClr val="A5A5A5"/></a:accent3><a:accent4><a:srgbClr val="FFC000"/></a:accent4><a:accent5><a:srgbClr val="5B9BD5"/></a:accent5><a:accent6><a:srgbClr val="70AD47"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></a:clrScheme>
+    <a:fontScheme name="Office"><a:majorFont><a:latin typeface="Calibri Light"/><a:ea typeface=""/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Calibri"/><a:ea typeface=""/><a:cs typeface=""/></a:minorFont></a:fontScheme>
+    <a:fmtScheme name="Office"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme>
+  </a:themeElements>
+</a:theme>`,
+  );
+  zip.file(
+    "ppt/slideMasters/slideMaster1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster ${NS}>
+  <p:cSld>
+    <p:spTree>
+      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+      <p:grpSpPr/>
+    </p:spTree>
+  </p:cSld>
+  <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>
+  <p:sldLayoutIdLst><p:sldLayoutId id="1" r:id="rId1"/></p:sldLayoutIdLst>
+  <p:txStyles>
+    <p:titleStyle/>
+    <p:bodyStyle><a:lvl1pPr><a:buChar char="■"/></a:lvl1pPr></p:bodyStyle>
+    <p:otherStyle/>
+  </p:txStyles>
+</p:sldMaster>`,
+  );
+  zip.file(
+    "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
+</Relationships>`,
+  );
+  zip.file(
+    "ppt/slideLayouts/slideLayout1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldLayout ${NS} preserve="1">
+  <p:cSld>
+    <p:spTree>
+      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+      <p:grpSpPr/>
+    </p:spTree>
+  </p:cSld>
+  <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+</p:sldLayout>`,
+  );
+  zip.file(
+    "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+</Relationships>`,
+  );
+  zip.file(
+    "ppt/slides/slide1.xml",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld ${NS}>
+  <p:cSld>
+    <p:spTree>
+      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+      <p:grpSpPr/>
+      ${textShape({
+        id: 2,
+        name: "Master bullet",
+        x: 1,
+        y: 2,
+        cx: 3,
+        cy: 4,
+        lstStyle: "",
+        paragraphs: `<a:p><a:r><a:t>Master bullet</a:t></a:r></a:p>`,
+      })}
+      ${textShape({
+        id: 3,
+        name: "Master buNone wins",
+        x: 1,
+        y: 2,
+        cx: 3,
+        cy: 4,
+        lstStyle: "",
+        paragraphs: `<a:p><a:pPr><a:buNone/></a:pPr><a:r><a:t>Master buNone wins</a:t></a:r></a:p>`,
+      })}
+    </p:spTree>
+  </p:cSld>
+</p:sld>`,
+  );
+  zip.file(
+    "ppt/slides/_rels/slide1.xml.rels",
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+</Relationships>`,
+  );
+  return zip.generateAsync({ type: "uint8array" });
 }

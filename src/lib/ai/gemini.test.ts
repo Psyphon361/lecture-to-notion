@@ -44,11 +44,11 @@ describe("analyzeImageDetailed", () => {
     expect(result.analysis.imageId).toBe("s5-e1");
     expect(result.analysis.extractedText).toBe("BBALLB-203 recieve");
     expect(result.model).toBe("gemini-3.8-flash");
-    expect(result.promptVersion).toBe("image-analysis-v1");
+    expect(result.promptVersion).toBe("image-analysis-v3");
     expect(result.inputTokens).toBe(11);
     expect(result.outputTokens).toBe(7);
     expect(logs).toEqual([
-      "image-analysis model=gemini-3.8-flash prompt=image-analysis-v1 inputTokens=11 outputTokens=7 latencyMs=0 outcome=ok",
+      "image-analysis model=gemini-3.8-flash prompt=image-analysis-v3 inputTokens=11 outputTokens=7 latencyMs=0 outcome=ok",
     ]);
     expect(logs.join(" ")).not.toContain(SECRET);
     expect(logs.join(" ")).not.toContain("BBALLB-203");

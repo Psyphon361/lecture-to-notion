@@ -13,7 +13,7 @@ import type { Presentation } from "@/lib/ppt/schema";
 describe("analyzeImageSet", () => {
   it("calls the model once for one hash on two slides", async () => {
     const calls: string[] = [];
-    const outcomes = await analyzeImageSet(
+    const { outcomes } = await analyzeImageSet(
       [
         candidate("one", 2, "aa"),
         candidate("two", 3, "aa"),
@@ -37,7 +37,7 @@ describe("analyzeImageSet", () => {
 
   it("does not call the model for a skipped image", async () => {
     let calls = 0;
-    const outcomes = await analyzeImageSet([candidate("logo", 1, "bb", 100, 100)], {
+    const { outcomes } = await analyzeImageSet([candidate("logo", 1, "bb", 100, 100)], {
       readAsset: async () => {
         throw new Error("bytes should stay unread");
       },
@@ -51,7 +51,7 @@ describe("analyzeImageSet", () => {
   });
 
   it("keeps an image unanalyzed when the model response stays invalid", async () => {
-    const outcomes = await analyzeImageSet([candidate("pic", 5, "cc")], {
+    const { outcomes } = await analyzeImageSet([candidate("pic", 5, "cc")], {
       readAsset: async () => ({ bytes: new Uint8Array([1]), mimeType: "image/png" }),
       analyze: async () => {
         throw new ImageAnalysisInvalidError();
@@ -63,15 +63,21 @@ describe("analyzeImageSet", () => {
     });
   });
 
-  it("stops the run when Gemini rate limits the call", async () => {
-    await expect(
-      analyzeImageSet([candidate("pic", 5, "dd")], {
+  it("returns partial outcomes and rateLimited when Gemini rate limits mid-run", async () => {
+    const { outcomes, rateLimited } = await analyzeImageSet(
+      [candidate("done", 1, "aa"), candidate("pending", 2, "bb")],
+      {
         readAsset: async () => ({ bytes: new Uint8Array([1]), mimeType: "image/png" }),
-        analyze: async () => {
-          throw new GeminiCallError(429);
+        analyze: async (input) => {
+          if (input.imageId === "pending") throw new GeminiCallError(429);
+          return { analysis: analysis("done") };
         },
-      }),
-    ).rejects.toMatchObject({ status: 429 });
+        concurrency: 1,
+      },
+    );
+    expect(rateLimited).toBe(true);
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({ imageId: "done", status: "analyzed" });
   });
 
   it("runs at most two analyses at a time", async () => {

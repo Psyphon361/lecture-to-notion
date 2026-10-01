@@ -82,6 +82,7 @@ interface BuildState {
   images: Map<string, ExtractedImage>;
   frames: GroupFrame[];
   emitted: Emitted[];
+  masterTxStyles: XmlElement | null;
 }
 
 /**
@@ -159,6 +160,7 @@ function normalizeSlide(
     images,
     frames: [],
     emitted: [],
+    masterTxStyles: masterTxStylesOf(source),
   };
   walkShapes(source.shapes, state);
   linkConnectors(state);
@@ -347,17 +349,18 @@ function emitConnector(shape: Connector, state: BuildState): void {
 
 function emitText(shape: Shape, state: BuildState): void {
   if (!shape.hasTextFrame) return;
+  const listStyle = shape.element.find(nsmap.p, "txBody")?.find(nsmap.a, "lstStyle");
   const paragraphs: TextParagraph[] = [];
   for (const paragraph of shape.textFrame.paragraphs) {
     const text = paragraphText(paragraph);
-    const bullet = bulletOf(paragraph);
-    if (text.length === 0 && bullet !== "bullet" && bullet !== "number") {
-      continue;
-    }
+    const bullet = bulletOf(paragraph, listStyle, state.masterTxStyles);
+    if (text.length === 0) continue;
+    const bold = paragraphIsFullyBold(paragraph);
     paragraphs.push({
       text,
       level: paragraphLevel(paragraph),
       ...(bullet ? { bullet } : {}),
+      ...(bold ? { bold: true } : {}),
     });
   }
   if (paragraphs.length === 0) return;
@@ -450,20 +453,62 @@ function descriptionOf(shape: BaseShape): string | undefined {
   return descr && descr.length > 0 ? descr : undefined;
 }
 
+type XmlElement = {
+  find: (ns: (typeof nsmap)[keyof typeof nsmap], name: string) => XmlElement | null | undefined;
+};
+
+function masterTxStylesOf(slide: PptxSlide): XmlElement | null {
+  try {
+    return slide.slideLayout.slideMaster.element.find(nsmap.p, "txStyles") ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * `buNone` / `buChar` / `buAutoNum` on this paragraph only.
+ * `buNone` / `buChar` / `buAutoNum` on paragraph `pPr`, then on shape `lstStyle`,
+ * then on slide-master `p:txStyles` (`bodyStyle`, then `otherStyle`) for this level.
  * `alphaLcPeriod` and every other autonum type are `number`.
- * Missing markup stays unset so layout inheritance is not invented.
+ * Explicit `buNone` on the paragraph wins over inherited bullets.
  */
 function bulletOf(
   paragraph: PptxParagraph,
+  listStyle?: XmlElement | null,
+  masterTxStyles?: XmlElement | null,
 ): TextParagraph["bullet"] | undefined {
   const properties = paragraph.element.find(nsmap.a, "pPr");
+  const own = bulletFromProperties(properties);
+  if (own !== undefined) return own;
+  const level = paragraphLevel(paragraph);
+  const fromList = listStyle
+    ? bulletFromProperties(listStyle.find(nsmap.a, `lvl${level + 1}pPr`))
+    : undefined;
+  if (fromList !== undefined) return fromList;
+  if (!masterTxStyles) return undefined;
+  const body = masterTxStyles.find(nsmap.p, "bodyStyle");
+  const fromBody = bulletFromProperties(body?.find(nsmap.a, `lvl${level + 1}pPr`));
+  if (fromBody !== undefined) return fromBody;
+  const other = masterTxStyles.find(nsmap.p, "otherStyle");
+  return bulletFromProperties(other?.find(nsmap.a, `lvl${level + 1}pPr`));
+}
+
+function bulletFromProperties(
+  properties: XmlElement | null | undefined,
+): TextParagraph["bullet"] | undefined {
   if (!properties) return undefined;
   if (properties.find(nsmap.a, "buNone")) return "none";
   if (properties.find(nsmap.a, "buChar")) return "bullet";
   if (properties.find(nsmap.a, "buAutoNum")) return "number";
   return undefined;
+}
+
+function paragraphIsFullyBold(paragraph: PptxParagraph): boolean {
+  if (paragraph.runs.length === 0) return false;
+  for (const run of paragraph.runs) {
+    const bold = run.element.find(nsmap.a, "rPr")?.getAttr("b");
+    if (bold !== "1" && bold !== "true") return false;
+  }
+  return true;
 }
 
 function paragraphLevel(paragraph: PptxParagraph): number {

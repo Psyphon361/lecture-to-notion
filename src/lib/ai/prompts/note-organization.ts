@@ -16,7 +16,7 @@ export function noteOrganizationPrompt(input: {
     "Copy terms and numbers as written. Do not invent a point that is not in the notes below.",
     "Source text stays source. Interpretation stays interpretation.",
     "Keep lists, tables, code, and pictures. A picture stays as its image id.",
-    "Each block type is paragraph, bullets, numbered, code, table, image, or divider.",
+    "Each block type is heading, paragraph, bullets, numbered, code, table, image, or divider.",
     "A list uses bullets or numbered. Each item is an object with a text field.",
     "Give the document one title and a heading hierarchy.",
   ];
@@ -48,6 +48,8 @@ function blockLines(block: NoteBlock): string[] {
         ? "source"
         : "text";
   switch (block.type) {
+    case "heading":
+      return [`${kind} heading: ${block.content}`];
     case "paragraph":
       return [`${kind}: ${block.content}`];
     case "bullets":

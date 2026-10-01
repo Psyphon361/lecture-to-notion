@@ -20,6 +20,7 @@ export const textParagraphSchema = z.object({
   text: z.string(),
   level: z.number().int().min(0),
   bullet: z.enum(["bullet", "number", "none"]).optional(),
+  bold: z.literal(true).optional(),
 });
 
 export const slideElementSchema = z.discriminatedUnion("type", [

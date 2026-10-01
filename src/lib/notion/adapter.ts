@@ -89,6 +89,10 @@ function mapSection(section: NoteSection): MappedBlock[] {
 
 function mapBlock(blockItem: NoteBlock): MappedBlock[] {
   switch (blockItem.type) {
+    case "heading":
+      return chunkRichText(richTextSegments(blockItem.content)).map((richText) =>
+        block("heading_2", { rich_text: richText }),
+      );
     case "paragraph":
       return textBlocks(blockItem.provenance === "interpretation" ? "callout" : "paragraph", blockItem.content);
     case "bullets":

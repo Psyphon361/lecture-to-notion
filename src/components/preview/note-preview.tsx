@@ -68,6 +68,9 @@ function BlockView({ block }: { block: NoteBlock }) {
 
   let body: ReactNode;
   switch (block.type) {
+    case "heading":
+      body = <h3 className="text-lg font-semibold leading-7">{block.content}</h3>;
+      break;
     case "paragraph":
       body = <p className="leading-7">{block.content}</p>;
       break;

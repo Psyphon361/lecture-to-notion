@@ -27,6 +27,12 @@ export const noteBlockSchema = z.discriminatedUnion("type", [
     provenance: provenanceSchema,
   }),
   z.object({
+    type: z.literal("heading"),
+    content: z.string(),
+    level: z.literal(2),
+    provenance: provenanceSchema,
+  }),
+  z.object({
     type: z.literal("bullets"),
     items: z.array(noteListItemSchema),
     provenance: provenanceSchema,

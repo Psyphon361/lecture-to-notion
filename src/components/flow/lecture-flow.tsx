@@ -1,15 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ProcessingStatus } from "@/components/processing/processing-status";
 import { SlideWorkspace } from "@/components/review/slide-workspace";
 import { UploadDropzone } from "@/components/upload/upload-dropzone";
 import {
   analyzeFailureSchema,
+  analyzeRateLimitedSchema,
   analyzeSuccessSchema,
   candidatesFromPresentation,
   presentationWithAnalyses,
+  type AnalyzeCandidate,
   type ImageOutcome,
 } from "@/lib/ai/analyze-response";
 import { fallbackSlideNotes } from "@/lib/ai/slide-fallback";
@@ -41,6 +43,12 @@ type FlowState =
       message: string;
       showExtracted: boolean;
     })
+  | (StoredRun & {
+      phase: "rate-limit-wait";
+      accumulatedOutcomes: ImageOutcome[];
+      waitCount: number;
+      secondsLeft: number;
+    })
   | {
       phase: "review";
       filename: string;
@@ -51,6 +59,8 @@ type FlowState =
       notes?: SlideNotes[];
       document?: NoteDocument;
     };
+
+const MAX_RATE_LIMIT_WAITS = 3;
 
 export function LectureFlow() {
   const [flow, setFlow] = useState<FlowState>({ phase: "idle" });
@@ -97,26 +107,65 @@ export function LectureFlow() {
       filename: run.filename,
       stages: stagesWhileAnalyzing(),
     });
-    const analyzed = await requestImageAnalysis(run.runId, run.presentation);
-    if (!analyzed.ok) {
+    await continueImageAnalysis(run, [], 0);
+  }
+
+  async function continueImageAnalysis(
+    run: StoredRun,
+    accumulatedOutcomes: ImageOutcome[],
+    waitCount: number,
+  ) {
+    const remaining = remainingCandidates(run.presentation, accumulatedOutcomes);
+    const analyzed = await requestImageAnalysis(run.runId, remaining);
+    if (analyzed.ok) {
+      finishAfterAnalysis(run, mergeOutcomes(accumulatedOutcomes, analyzed.outcomes));
+      return;
+    }
+    if (analyzed.rateLimited) {
+      const merged = mergeOutcomes(accumulatedOutcomes, analyzed.outcomes);
+      if (waitCount >= MAX_RATE_LIMIT_WAITS) {
+        setFlow({
+          phase: "analyze-stopped",
+          filename: run.filename,
+          runId: run.runId,
+          presentation: run.presentation,
+          warnings: run.warnings,
+          message: analyzed.message,
+          showExtracted: false,
+        });
+        return;
+      }
       setFlow({
-        phase: "analyze-stopped",
+        phase: "rate-limit-wait",
         filename: run.filename,
         runId: run.runId,
         presentation: run.presentation,
         warnings: run.warnings,
-        message: analyzed.message,
-        showExtracted: false,
+        accumulatedOutcomes: merged,
+        waitCount: waitCount + 1,
+        secondsLeft: Math.ceil(analyzed.retryAfterMs / 1000),
       });
       return;
     }
-    const presentation = presentationWithAnalyses(run.presentation, analyzed.outcomes);
-    const notes = presentation.slides.map((slide) => fallbackSlideNotes(slide, analyzed.outcomes));
+    setFlow({
+      phase: "analyze-stopped",
+      filename: run.filename,
+      runId: run.runId,
+      presentation: run.presentation,
+      warnings: run.warnings,
+      message: analyzed.message,
+      showExtracted: false,
+    });
+  }
+
+  function finishAfterAnalysis(run: StoredRun, outcomes: ImageOutcome[]) {
+    const presentation = presentationWithAnalyses(run.presentation, outcomes);
+    const notes = presentation.slides.map((slide) => fallbackSlideNotes(slide, outcomes));
     organizeStructuredNotes({
       filename: run.filename,
       presentation,
       warnings: run.warnings,
-      outcomes: analyzed.outcomes,
+      outcomes,
       notes,
     });
   }
@@ -156,6 +205,34 @@ export function LectureFlow() {
         title="Analyzing images"
         summary={`Reading diagrams and screenshots in ${flow.filename}. Structuring and organization have not started.`}
         stages={flow.stages}
+      />
+    );
+  }
+
+  if (flow.phase === "rate-limit-wait") {
+    const waiting = flow;
+    return (
+      <RateLimitWait
+        filename={waiting.filename}
+        secondsLeft={waiting.secondsLeft}
+        stages={stagesWhileAnalyzing()}
+        onDone={() => {
+          setFlow({
+            phase: "analyzing",
+            filename: waiting.filename,
+            stages: stagesWhileAnalyzing(),
+          });
+          void continueImageAnalysis(
+            {
+              filename: waiting.filename,
+              runId: waiting.runId,
+              presentation: waiting.presentation,
+              warnings: waiting.warnings,
+            },
+            waiting.accumulatedOutcomes,
+            waiting.waitCount,
+          );
+        }}
       />
     );
   }
@@ -327,21 +404,37 @@ function readExportFailure(payload: unknown): string | null {
 
 async function requestImageAnalysis(
   runId: string,
-  presentation: Presentation,
-): Promise<{ ok: true; outcomes: ImageOutcome[] } | { ok: false; message: string }> {
+  images: AnalyzeCandidate[],
+):
+  | Promise<{ ok: true; outcomes: ImageOutcome[] }>
+  | Promise<{
+      ok: false;
+      rateLimited: true;
+      message: string;
+      retryAfterMs: number;
+      outcomes: ImageOutcome[];
+    }>
+  | Promise<{ ok: false; rateLimited?: false; message: string }> {
   try {
     const response = await fetch("/api/analyze-images", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        runId,
-        images: candidatesFromPresentation(presentation),
-      }),
+      body: JSON.stringify({ runId, images }),
     });
     const payload: unknown = await response.json();
     const success = analyzeSuccessSchema.safeParse(payload);
     if (response.ok && success.success) {
       return { ok: true, outcomes: success.data.outcomes };
+    }
+    const rateLimited = analyzeRateLimitedSchema.safeParse(payload);
+    if (response.status === 429 && rateLimited.success) {
+      return {
+        ok: false,
+        rateLimited: true,
+        message: rateLimited.data.message,
+        retryAfterMs: rateLimited.data.retryAfterMs,
+        outcomes: rateLimited.data.outcomes,
+      };
     }
     const failure = analyzeFailureSchema.safeParse(payload);
     return {
@@ -351,4 +444,61 @@ async function requestImageAnalysis(
   } catch {
     return { ok: false, message: "Image analysis failed. Try the file again." };
   }
+}
+
+function mergeOutcomes(base: ImageOutcome[], extra: ImageOutcome[]): ImageOutcome[] {
+  const byId = new Map(base.map((outcome) => [outcome.imageId, outcome]));
+  for (const outcome of extra) {
+    byId.set(outcome.imageId, outcome);
+  }
+  return [...byId.values()];
+}
+
+function remainingCandidates(
+  presentation: Presentation,
+  finishedOutcomes: ImageOutcome[],
+): AnalyzeCandidate[] {
+  const finishedIds = new Set(finishedOutcomes.map((outcome) => outcome.imageId));
+  return candidatesFromPresentation(presentation).filter((candidate) => !finishedIds.has(candidate.imageId));
+}
+
+function RateLimitWait({
+  filename,
+  secondsLeft: initialSeconds,
+  stages,
+  onDone,
+}: {
+  filename: string;
+  secondsLeft: number;
+  stages: StageState[];
+  onDone: () => void;
+}) {
+  const [secondsLeft, setSecondsLeft] = useState(initialSeconds);
+  const finished = useRef(false);
+
+  useEffect(() => {
+    setSecondsLeft(initialSeconds);
+    finished.current = false;
+  }, [initialSeconds]);
+
+  useEffect(() => {
+    if (secondsLeft <= 0) {
+      if (finished.current) return;
+      finished.current = true;
+      onDone();
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setSecondsLeft((current) => current - 1);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [secondsLeft, onDone]);
+
+  return (
+    <ProcessingStatus
+      title="Waiting for rate limit"
+      summary={`Gemini is rate limiting image analysis for ${filename}. Continuing in ${secondsLeft} second${secondsLeft === 1 ? "" : "s"}.`}
+      stages={stages}
+    />
+  );
 }

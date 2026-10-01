@@ -97,11 +97,17 @@ describe("POST /api/analyze-images", () => {
         throw new MissingGeminiKeyError();
       },
     );
-    const limitedBody = (await limited.json()) as { message: string };
+    const limitedBody = (await limited.json()) as {
+      message: string;
+      retryAfterMs?: number;
+      outcomes?: unknown[];
+    };
     const missingBody = (await missing.json()) as { message: string };
 
     expect(limited.status).toBe(429);
     expect(limitedBody.message).toMatch(/rate limiting/);
+    expect(limitedBody.retryAfterMs).toBe(60_000);
+    expect(limitedBody.outcomes).toEqual([]);
     expect(missing.status).toBe(500);
     expect(missingBody.message).toMatch(/API key/);
     expect(JSON.stringify({ limitedBody, missingBody, logs })).not.toContain("GEMINI_API_KEY");

@@ -20,6 +20,7 @@ export function fallbackSlideNotes(slide: Slide, outcomes: ImageOutcome[] = []):
   const sourceReferences: SlideNotes["sourceReferences"] = [];
   let title: string | undefined;
   let usedTitle = false;
+  const pictureOnlySlide = isPictureOnlySlide(slide);
 
   for (const element of elementsInReadingOrder(slide.elements)) {
     if (element.type === "text" && element.isTitle && !usedTitle) {
@@ -32,7 +33,12 @@ export function fallbackSlideNotes(slide: Slide, outcomes: ImageOutcome[] = []):
       }
     }
 
-    const contributed = appendElement(element, readings, blocks, warnings);
+    const contributed = appendElement(element, readings, blocks, warnings, pictureOnlySlide, (imageTitle) => {
+      if (!usedTitle && imageTitle) {
+        title = imageTitle;
+        usedTitle = true;
+      }
+    });
     if (contributed) {
       sourceReferences.push({ slideNumber: slide.slideNumber, elementId: element.id });
     }
@@ -73,6 +79,8 @@ function appendElement(
   readings: Map<string, ImageOutcome>,
   blocks: NoteBlock[],
   warnings: string[],
+  pictureOnlySlide: boolean,
+  onImageTitle: (title: string) => void,
 ): boolean {
   if (element.type === "text") {
     const next = blocksFromParagraphs(element.paragraphs);
@@ -89,7 +97,9 @@ function appendElement(
     blocks.push({ type: "paragraph", content: element.text, provenance: "source" });
     return true;
   }
-  if (element.type === "image") return appendImage(element, readings.get(element.id), blocks, warnings);
+  if (element.type === "image") {
+    return appendImage(element, readings.get(element.id), blocks, warnings, pictureOnlySlide, onImageTitle);
+  }
   return false;
 }
 
@@ -100,35 +110,51 @@ function appendImage(
   outcome: ImageOutcome | undefined,
   blocks: NoteBlock[],
   warnings: string[],
+  pictureOnlySlide: boolean,
+  onImageTitle: (title: string) => void,
 ): boolean {
   if (!outcome || outcome.status === "skipped") return false;
   if (outcome.status === "unanalyzed") {
     warnings.push(outcome.warning);
     return true;
   }
-  return appendAnalysis(element.assetId, outcome.analysis, blocks, warnings);
+  return appendAnalysis(element.assetId, outcome.analysis, blocks, warnings, pictureOnlySlide, onImageTitle);
 }
 
-function appendAnalysis(assetId: string, analysis: ImageAnalysis, blocks: NoteBlock[], warnings: string[]): boolean {
+function appendAnalysis(
+  assetId: string,
+  analysis: ImageAnalysis,
+  blocks: NoteBlock[],
+  warnings: string[],
+  pictureOnlySlide: boolean,
+  onImageTitle: (title: string) => void,
+): boolean {
   let contributed = false;
   const extracted = written(analysis.extractedText);
   const description = written(analysis.description);
   const relationships = (analysis.relationships ?? []).map(written).filter((item): item is string => item !== undefined);
-  const picture = keepsPicture(analysis.kind, relationships);
+  const structuredLines = structuredImageLines(analysis.lines);
+  const picture = keepsPicture(analysis.kind, relationships, pictureOnlySlide);
   if (picture) {
-    blocks.push({
-      type: "image",
-      assetId,
-      ...(description ? { caption: description } : {}),
-      provenance: "source",
-    });
+    blocks.push({ type: "image", assetId, provenance: "source" });
     contributed = true;
+    if (structuredLines) {
+      const imageTitle = titleFromStructuredLines(structuredLines);
+      if (imageTitle) onImageTitle(imageTitle);
+    }
+    for (const uncertainty of analysis.uncertainties ?? []) {
+      const warning = written(uncertainty);
+      if (!warning) continue;
+      warnings.push(warning);
+      contributed = true;
+    }
+    return contributed;
   }
-  if (extracted) {
+  if (extracted && !picture) {
     blocks.push({ type: "paragraph", content: extracted, provenance: "source" });
     contributed = true;
   }
-  if (description && !picture) {
+  if (description && (!picture || relationships.length === 0)) {
     blocks.push({ type: "paragraph", content: description, provenance: "interpretation" });
     contributed = true;
   }
@@ -149,8 +175,45 @@ function appendAnalysis(assetId: string, analysis: ImageAnalysis, blocks: NoteBl
   return contributed;
 }
 
-function keepsPicture(kind: ImageAnalysis["kind"], relationships: string[]): boolean {
+function keepsPicture(
+  kind: ImageAnalysis["kind"],
+  relationships: string[],
+  pictureOnlySlide: boolean,
+): boolean {
+  if (pictureOnlySlide) return true;
   return (kind !== undefined && PICTURE_KINDS.has(kind)) || relationships.length > 0;
+}
+
+function isPictureOnlySlide(slide: Slide): boolean {
+  const images = slide.elements.filter((element) => element.type === "image");
+  if (images.length !== 1) return false;
+  for (const element of slide.elements) {
+    if (element.type === "image") continue;
+    if (element.type === "text") {
+      if (element.paragraphs.some((paragraph) => written(paragraph.text))) return false;
+      continue;
+    }
+    if (element.type === "table" && element.rows.length > 0) return false;
+    if (element.type === "shape" && written(element.text)) return false;
+  }
+  return true;
+}
+
+function structuredImageLines(
+  lines: ImageAnalysis["lines"],
+): NonNullable<ImageAnalysis["lines"]> | undefined {
+  if (!lines || lines.length === 0) return undefined;
+  const kept = lines.filter((line) => written(line.text));
+  return kept.length > 0 ? kept : undefined;
+}
+
+function titleFromStructuredLines(lines: NonNullable<ImageAnalysis["lines"]>): string | undefined {
+  for (const line of lines) {
+    if (line.role !== "title") continue;
+    const text = written(line.text);
+    if (text) return text;
+  }
+  return undefined;
 }
 
 function blocksFromParagraphs(paragraphs: TextParagraph[]): NoteBlock[] {
@@ -164,7 +227,16 @@ function blocksFromParagraphs(paragraphs: TextParagraph[]): NoteBlock[] {
     }
     const kind = current.bullet ?? "none";
     if (kind === "none") {
-      blocks.push({ type: "paragraph", content: current.text, provenance: "source" });
+      if (current.bold) {
+        blocks.push({
+          type: "heading",
+          content: current.text,
+          level: 2,
+          provenance: "source",
+        });
+      } else {
+        blocks.push({ type: "paragraph", content: current.text, provenance: "source" });
+      }
       index += 1;
       continue;
     }

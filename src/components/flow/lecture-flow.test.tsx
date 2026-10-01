@@ -45,9 +45,66 @@ afterEach(() => {
   root = undefined;
   document.body.innerHTML = "";
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe("lecture flow", () => {
+  it("waits out a rate limit and retries only unfinished images", async () => {
+    const analyzeBodies: { images: { imageId: string }[] }[] = [];
+    let analyzeAttempts = 0;
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/parse")) {
+        return json({ ok: true, runId, presentation: twoImageDeck, warnings: [] });
+      }
+      if (url.endsWith("/api/analyze-images")) {
+        analyzeAttempts += 1;
+        const body = JSON.parse(String(init?.body)) as { images: { imageId: string }[] };
+        analyzeBodies.push(body);
+        if (analyzeAttempts === 1) {
+          return json(
+            {
+              ok: false,
+              message: "Gemini is rate limiting image analysis. Wait a moment and try again.",
+              retryAfterMs: 1000,
+              outcomes: [
+                {
+                  imageId: "img-done",
+                  status: "analyzed",
+                  analysis: {
+                    imageId: "img-done",
+                    containsUsefulInformation: true,
+                    extractedText: "Finished picture",
+                  },
+                },
+              ],
+            },
+            429,
+          );
+        }
+        return json({ ok: true, outcomes: [] });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    });
+
+    const container = await render(<LectureFlow />);
+    await chooseFile(container);
+
+    expect(container.textContent).toContain("Waiting for rate limit");
+    expect(container.textContent).toMatch(/rate limiting image analysis/);
+    expect(container.textContent).toContain("Continuing in 1 second.");
+    expect(analyzeBodies[0]?.images.map((image) => image.imageId)).toEqual(["img-done", "img-pending"]);
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+    });
+    await settle();
+
+    expect(analyzeAttempts).toBe(2);
+    expect(analyzeBodies[1]?.images.map((image) => image.imageId)).toEqual(["img-pending"]);
+    expect(textButton(container, "Export to Notion")).toBeTruthy();
+  });
+
   it("keeps a failed analysis off the lecture screen and retries the same run", async () => {
     const calls: { url: string; form: boolean; runId?: string }[] = [];
     let analyzeAttempts = 0;
@@ -68,9 +125,9 @@ describe("lecture flow", () => {
           return json(
             {
               ok: false,
-              message: "Gemini is rate limiting image analysis. Wait a moment and try again.",
+              message: "Gemini could not analyze the images. Try again in a moment.",
             },
-            429,
+            502,
           );
         }
         return json({ ok: true, outcomes: [] });
@@ -91,7 +148,7 @@ describe("lecture flow", () => {
 
     expect(container.textContent).toContain("lecture.pptx");
     expect(container.textContent).toContain(
-      "Gemini is rate limiting image analysis. Wait a moment and try again.",
+      "Gemini could not analyze the images. Try again in a moment.",
     );
     expect(textButton(container, "Try again")).toBeTruthy();
     expect(textButton(container, "View extracted slides")).toBeTruthy();
@@ -245,6 +302,37 @@ describe("lecture flow", () => {
 });
 
 const hash = "a".repeat(64);
+
+const twoImageDeck = {
+  id: "deck",
+  filename: "lecture.pptx",
+  slides: [
+    {
+      slideNumber: 1,
+      elements: [
+        {
+          id: "img-done",
+          type: "image",
+          assetId: `${runId}/${hash}`,
+          contentHash: hash,
+          mimeType: "image/png",
+        },
+      ],
+    },
+    {
+      slideNumber: 2,
+      elements: [
+        {
+          id: "img-pending",
+          type: "image",
+          assetId: `${runId}/${"b".repeat(64)}`,
+          contentHash: "b".repeat(64),
+          mimeType: "image/png",
+        },
+      ],
+    },
+  ],
+};
 
 const mixedDeck = {
   id: "deck",

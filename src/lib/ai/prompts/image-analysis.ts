@@ -1,4 +1,4 @@
-export const PROMPT_VERSION = "image-analysis-v1";
+export const PROMPT_VERSION = "image-analysis-v3";
 
 /**
  * One prompt for one image. Slide body text is not included.
@@ -15,6 +15,8 @@ export function imageAnalysisPrompt(input?: {
     "Put unread or unsure spots in uncertainties. Leave them out of extractedText and relationships.",
     "description is interpretation. It is not a transcription.",
     "extractedText is only text you can see in the image.",
+    "When the slide is one picture with readable text, use lines instead of one long extractedText. Each line gets a role: title for the main title, heading for a section line, body for normal text, callout for a boxed or emphasized note such as Historical Flaw or Requirement. Copy each line exactly.",
+    "Do not transcribe a college crest, institution name banner, or running header. Leave that text out of extractedText, lines, and description.",
   ];
   const altText = input?.altText?.trim();
   if (altText) {

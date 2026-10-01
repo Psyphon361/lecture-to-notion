@@ -24,6 +24,7 @@ describe("organizeLocally", () => {
             ["Need", "A gap"],
           ],
         },
+        { type: "divider" },
       ],
     });
     expect(document.sections[1]).toEqual({

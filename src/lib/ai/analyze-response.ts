@@ -49,10 +49,20 @@ export const analyzeFailureSchema = z.object({
   message: z.string().min(1),
 });
 
+export const analyzeRateLimitedSchema = z.object({
+  ok: z.literal(false),
+  message: z.string().min(1),
+  retryAfterMs: z.number().int().positive(),
+  outcomes: z.array(imageOutcomeSchema),
+});
+
 export type AnalyzeCandidate = z.infer<typeof analyzeCandidateSchema>;
 export type ImageOutcome = z.infer<typeof imageOutcomeSchema>;
 export type AnalyzeSuccess = z.infer<typeof analyzeSuccessSchema>;
 export type AnalyzeFailure = z.infer<typeof analyzeFailureSchema>;
+export type AnalyzeRateLimited = z.infer<typeof analyzeRateLimitedSchema>;
+
+export const RATE_LIMIT_RETRY_MS = 60_000;
 
 export function candidatesFromPresentation(presentation: Presentation): AnalyzeCandidate[] {
   return presentation.slides.flatMap((slide) =>

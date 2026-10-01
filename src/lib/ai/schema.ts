@@ -11,6 +11,15 @@ const imageKindSchema = z.enum([
   "decorative",
 ]);
 
+const imageLineRoleSchema = z.enum(["title", "heading", "body", "callout"]);
+
+const imageLineModelSchema = z.object({
+  role: imageLineRoleSchema.describe(
+    "title is the main slide title. heading is a section line. body is normal text. callout is a boxed or emphasized note.",
+  ),
+  text: z.string().describe("One visible line, copied exactly as seen."),
+});
+
 /**
  * Fields the model is allowed to fill in.
  * No `.min()`: Zod's JSON Schema emits `minLength`, which Gemini ignores.
@@ -27,6 +36,12 @@ export const imageAnalysisModelSchema = z.object({
     .string()
     .optional()
     .describe("Verbatim text as seen. Do not correct spelling, codes, numbers, or equations."),
+  lines: z
+    .array(imageLineModelSchema)
+    .optional()
+    .describe(
+      "Visible lines with a role when the slide is mostly one image. Copy each line exactly. Prefer lines over a single extractedText blob.",
+    ),
   description: z
     .string()
     .optional()

@@ -65,6 +65,39 @@ describe("fallbackSlideNotes", () => {
     expect(JSON.stringify(notes)).not.toContain("planted speaker note");
   });
 
+  it("turns a fully bold body line into a level-2 heading and keeps bullet lists", () => {
+    const notes = fallbackSlideNotes(
+      slide({
+        elements: [
+          {
+            id: "s5-body",
+            type: "text",
+            paragraphs: [
+              { text: "Stage 3: Considering the alternatives", level: 0, bold: true },
+              { text: "Option A", level: 0, bullet: "bullet" },
+              { text: "Option B", level: 0, bullet: "bullet" },
+            ],
+          },
+        ],
+      }),
+      [],
+    );
+
+    expect(notes.blocks).toEqual([
+      {
+        type: "heading",
+        content: "Stage 3: Considering the alternatives",
+        level: 2,
+        provenance: "source",
+      },
+      {
+        type: "bullets",
+        provenance: "source",
+        items: [{ text: "Option A" }, { text: "Option B" }],
+      },
+    ]);
+  });
+
   it("keeps table cells as a source table", () => {
     const notes = fallbackSlideNotes(
       slide({
@@ -107,18 +140,7 @@ describe("fallbackSlideNotes", () => {
     ]);
 
     expect(notes.blocks).toEqual([
-      {
-        type: "image",
-        assetId: "run/secret-asset",
-        caption: "A course code on the slide.",
-        provenance: "source",
-      },
-      { type: "paragraph", content: "BBALLB-203 recieve", provenance: "source" },
-      {
-        type: "bullets",
-        provenance: "interpretation",
-        items: [{ text: "The code sits under the heading." }],
-      },
+      { type: "image", assetId: "run/secret-asset", provenance: "source" },
     ]);
     expect(notes.warnings).toEqual(["The last digit is faint."]);
     expect(notes.sourceReferences).toEqual([{ slideNumber: 3, elementId: "s3-img" }]);
@@ -134,17 +156,11 @@ describe("fallbackSlideNotes", () => {
     ]);
 
     expect(notes.blocks).toEqual([
-      {
-        type: "image",
-        assetId: "run/secret-asset",
-        caption: "A three-step flow.",
-        provenance: "source",
-      },
-      { type: "paragraph", content: "Start", provenance: "source" },
+      { type: "image", assetId: "run/secret-asset", provenance: "source" },
     ]);
   });
 
-  it("keeps words only for a text image with no relationships", () => {
+  it("keeps a picture-only slide image without a flat extractedText paragraph", () => {
     const notes = fallbackSlideNotes(pictureSlide(), [
       analyzed("s3-img", {
         kind: "text",
@@ -154,13 +170,48 @@ describe("fallbackSlideNotes", () => {
     ]);
 
     expect(notes.blocks).toEqual([
-      { type: "paragraph", content: "BBALLB-203 recieve", provenance: "source" },
-      {
-        type: "paragraph",
-        content: "A course code on the slide.",
-        provenance: "interpretation",
-      },
+      { type: "image", assetId: "run/secret-asset", provenance: "source" },
     ]);
+    expect(JSON.stringify(notes)).not.toContain("BBALLB-203 recieve");
+  });
+
+  it("maps image lines to the slide title, headings, body, and callout", () => {
+    const notes = fallbackSlideNotes(pictureSlide(), [
+      analyzed("s3-img", {
+        kind: "text",
+        extractedText: "flat blob that should not appear",
+        description: "Overall layout of the infographic.",
+        lines: [
+          { role: "title", text: "Victim Compensation" },
+          { role: "heading", text: "Section 357 CrPC" },
+          { role: "body", text: "Compensation may be ordered at the time of sentencing." },
+          { role: "callout", text: "Historical Flaw" },
+        ],
+      }),
+    ]);
+
+    expect(notes.title).toBe("Victim Compensation");
+    expect(notes.blocks).toEqual([
+      { type: "image", assetId: "run/secret-asset", provenance: "source" },
+    ]);
+    expect(JSON.stringify(notes)).not.toContain("flat blob");
+    expect(JSON.stringify(notes)).not.toContain("Section 357 CrPC");
+    expect(JSON.stringify(notes)).not.toContain("Historical Flaw");
+    expect(JSON.stringify(notes)).not.toContain("Overall layout of the infographic.");
+  });
+
+  it("keeps a picture-only image when lines are missing", () => {
+    const notes = fallbackSlideNotes(pictureSlide(), [
+      analyzed("s3-img", {
+        kind: "photo",
+        extractedText: "Should not become one paragraph",
+      }),
+    ]);
+
+    expect(notes.blocks).toEqual([
+      { type: "image", assetId: "run/secret-asset", provenance: "source" },
+    ]);
+    expect(JSON.stringify(notes)).not.toContain("Should not become one paragraph");
   });
 
   it("adds no body text for a skipped decorative image", () => {

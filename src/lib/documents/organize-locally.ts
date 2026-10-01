@@ -14,10 +14,10 @@ export function organizeLocally(notes: SlideNotes[], filename: string): NoteDocu
   const sourceReferences = notes.flatMap((slide) => slide.sourceReferences);
   return noteDocumentSchema.parse({
     title,
-    sections: notes.map((slide) => ({
+    sections: notes.map((slide, index) => ({
       heading: headingFor(slide),
       level: 1,
-      blocks: sectionBlocks(slide),
+      blocks: sectionBlocks(slide, index < notes.length - 1),
     })),
     ...(sourceReferences.length > 0 ? { sourceReferences } : {}),
   });
@@ -36,10 +36,12 @@ function headingFor(slide: SlideNotes): string {
   return title ? title : `Slide ${slide.slideNumber}`;
 }
 
-function sectionBlocks(slide: SlideNotes): NoteBlock[] {
+function sectionBlocks(slide: SlideNotes, addTrailingDivider: boolean): NoteBlock[] {
   const warnings = (slide.warnings ?? []).flatMap((warning) => {
     const content = warning.trim();
     return content ? [{ type: "paragraph" as const, content }] : [];
   });
-  return [...warnings, ...slide.blocks.map((block) => structuredClone(block))];
+  const blocks = [...warnings, ...slide.blocks.map((block) => structuredClone(block))];
+  if (addTrailingDivider) blocks.push({ type: "divider" });
+  return blocks;
 }
