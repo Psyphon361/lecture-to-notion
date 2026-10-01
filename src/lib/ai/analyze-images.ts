@@ -90,7 +90,7 @@ function buildOutcomes(
   failures: Map<string, string>,
   processedHashes: Set<string> | null,
 ): ImageOutcome[] {
-  return images.flatMap((image) => {
+  return images.flatMap((image): ImageOutcome[] => {
     const reason = skipped.get(image.imageId);
     if (reason) return [{ imageId: image.imageId, status: "skipped" as const, reason }];
     if (processedHashes && !processedHashes.has(image.contentHash)) return [];

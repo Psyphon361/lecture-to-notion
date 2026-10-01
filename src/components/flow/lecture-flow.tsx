@@ -405,16 +405,17 @@ function readExportFailure(payload: unknown): string | null {
 async function requestImageAnalysis(
   runId: string,
   images: AnalyzeCandidate[],
-):
-  | Promise<{ ok: true; outcomes: ImageOutcome[] }>
-  | Promise<{
+): Promise<
+  | { ok: true; outcomes: ImageOutcome[] }
+  | {
       ok: false;
       rateLimited: true;
       message: string;
       retryAfterMs: number;
       outcomes: ImageOutcome[];
-    }>
-  | Promise<{ ok: false; rateLimited?: false; message: string }> {
+    }
+  | { ok: false; rateLimited?: false; message: string }
+> {
   try {
     const response = await fetch("/api/analyze-images", {
       method: "POST",
