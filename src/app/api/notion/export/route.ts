@@ -4,18 +4,20 @@ import { noteDocumentSchema, type NoteDocument } from "@/lib/documents/schema";
 import { ensureFreshToken, resolveNotionAuth } from "@/lib/notion/auth";
 import { exportNoteDocument } from "@/lib/notion/export-document";
 import type { NotionEnv } from "@/lib/notion/oauth";
+import { listAccessiblePages, selectExportParent } from "@/lib/notion/pages";
 import {
   clearSession,
   writeSession,
   type NotionSession,
 } from "@/lib/notion/session";
-import { createLocalStorage, type Storage } from "@/lib/storage/storage";
+import { createStorage } from "@/lib/storage/default-storage";
+import type { Storage } from "@/lib/storage/storage";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest): Promise<Response> {
   return handleNotionExport(request, {
-    storage: createLocalStorage(),
+    storage: createStorage(),
   });
 }
 
@@ -49,6 +51,7 @@ export async function handleNotionExport(
   }
 
   let accessToken = auth.accessToken;
+  let parentPageId = auth.parentPageId;
   let refreshedSession: NotionSession | undefined;
   if (auth.mode === "oauth") {
     const fresh = await ensureFreshToken(auth, env, fetchImpl);
@@ -59,12 +62,25 @@ export async function handleNotionExport(
     }
     accessToken = fresh.auth.accessToken ?? accessToken;
     refreshedSession = fresh.session;
+
+    try {
+      const selected = selectExportParent(await listAccessiblePages(accessToken, fetchImpl));
+      if (!selected) {
+        return failure(
+          400,
+          "No Notion page is shared with this connection. Disconnect, connect again, and select the page for your notes.",
+        );
+      }
+      parentPageId = selected.id;
+    } catch {
+      return failure(502, "Notion pages could not be loaded. Try again.");
+    }
   }
 
   const outcome = await exportNoteDocument({
     document,
     token: accessToken,
-    parentPageId: auth.parentPageId,
+    parentPageId,
     storage: deps.storage,
     fetch: fetchImpl,
   });

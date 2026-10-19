@@ -13,7 +13,6 @@ describe("notionStatusFromAuth", () => {
       workspaceName: null,
       parentPageId: null,
       needsParentPage: false,
-      canPickParent: false,
     });
   });
 
@@ -32,11 +31,10 @@ describe("notionStatusFromAuth", () => {
       mode: "token",
       parentPageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
       needsParentPage: false,
-      canPickParent: false,
     });
   });
 
-  it("reports an OAuth workspace and asks for a page when missing", () => {
+  it("reports an OAuth workspace without needing a configured page", () => {
     const auth: NotionAuth = {
       mode: "oauth",
       accessToken: "oauth-token",
@@ -56,8 +54,7 @@ describe("notionStatusFromAuth", () => {
       mode: "oauth",
       workspaceName: "Lecture workspace",
       parentPageId: null,
-      needsParentPage: true,
-      canPickParent: true,
+      needsParentPage: false,
     });
   });
 });

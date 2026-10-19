@@ -19,6 +19,9 @@ import {
 /**
  * Who is allowed to talk to Notion for this request.
  * OAuth session first, then the server-side internal token.
+ * An OAuth session has no configured parent: exports go to the page the user
+ * selected in Notion's consent screen (see `selectExportParent`).
+ * Only the internal token uses NOTION_PARENT_PAGE_ID.
  */
 
 export type NotionAuthMode = "oauth" | "token" | "none";
@@ -54,12 +57,10 @@ export function resolveNotionAuth(
   const envParentPageId = normalizeParent(env.NOTION_PARENT_PAGE_ID);
 
   if (session) {
-    const parentPageId = session.parentPageId ?? envParentPageId;
     return {
       mode: "oauth",
       accessToken: session.accessToken,
       ...(session.refreshToken ? { refreshToken: session.refreshToken } : {}),
-      ...(parentPageId ? { parentPageId } : {}),
       session,
       sessionKey: config?.encryptionKey,
     };

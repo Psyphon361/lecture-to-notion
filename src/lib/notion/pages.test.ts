@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  NotionPageError,
   listAccessiblePages,
   mapSearchResults,
   readPageTitle,
-  validateParentPage,
+  selectExportParent,
 } from "@/lib/notion/pages";
 
 const pageId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -99,26 +98,34 @@ describe("listAccessiblePages", () => {
   });
 });
 
-describe("validateParentPage", () => {
-  it("normalizes a Notion URL and confirms the page is visible", async () => {
-    const calls: string[] = [];
-    const normalized = await validateParentPage(
-      "token",
-      `https://www.notion.so/workspace/Notes-${pageId.replaceAll("-", "")}`,
-      async (input) => {
-        calls.push(new URL(String(input)).pathname);
-        return jsonResponse({ object: "page", id: pageId });
-      },
-    );
-
-    expect(normalized).toBe(pageId);
-    expect(calls).toEqual([`/v1/pages/${pageId}`]);
+describe("selectExportParent", () => {
+  const page = (id: string, parentPageId?: string) => ({
+    id,
+    title: id,
+    url: `https://www.notion.so/${id}`,
+    ...(parentPageId ? { parentPageId } : {}),
   });
 
-  it("rejects a value that is not a page id or URL", async () => {
-    await expect(
-      validateParentPage("token", "not-a-page", async () => jsonResponse({})),
-    ).rejects.toBeInstanceOf(NotionPageError);
+  it("picks the selected page, not its children", () => {
+    const pages = [page("child-1", "root"), page("root"), page("child-2", "child-1")];
+    expect(selectExportParent(pages)?.id).toBe("root");
+  });
+
+  it("treats a page under an unshared parent as a root", () => {
+    expect(selectExportParent([page("a", "not-shared")])?.id).toBe("a");
+  });
+
+  it("returns null when nothing is shared", () => {
+    expect(selectExportParent([])).toBeNull();
+  });
+});
+
+describe("mapSearchResults parent", () => {
+  it("reads the parent page id", () => {
+    const [mapped] = mapSearchResults({
+      results: [{ object: "page", id: pageId, parent: { type: "page_id", page_id: "p-1" } }],
+    });
+    expect(mapped?.parentPageId).toBe("p-1");
   });
 });
 

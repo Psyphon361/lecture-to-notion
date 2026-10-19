@@ -15,7 +15,6 @@ export function notionStatusFromAuth(
     mode: auth.mode,
     workspaceName: auth.session?.workspaceName ?? null,
     parentPageId,
-    needsParentPage: connected && !parentPageId,
-    canPickParent: auth.mode === "oauth",
+    needsParentPage: auth.mode === "token" && !parentPageId,
   };
 }

@@ -10,7 +10,6 @@ export const notionStatusSchema = z.object({
   workspaceName: z.string().nullable(),
   parentPageId: z.string().nullable(),
   needsParentPage: z.boolean(),
-  canPickParent: z.boolean(),
 });
 
 export const accessiblePageSchema = z.object({

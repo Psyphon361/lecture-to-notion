@@ -1,5 +1,4 @@
 import { notionFetch } from "@/lib/notion/client";
-import { normalizeParentPageId } from "@/lib/notion/export-document";
 
 /**
  * Pages the current connection can see. With OAuth this is whatever the user
@@ -10,16 +9,19 @@ export interface AccessiblePage {
   id: string;
   title: string;
   url: string;
+  /** Id of the page this one sits under, when its parent is a page. */
+  parentPageId?: string;
 }
 
-export class NotionPageError extends Error {
-  readonly status: number;
-
-  constructor(message: string, status = 400) {
-    super(message);
-    this.name = "NotionPageError";
-    this.status = status;
-  }
+/**
+ * The page the user selected in Notion's consent screen.
+ * Notion also returns the children of a selected page, so keep only pages whose
+ * parent is not itself in the results. Results are newest-edited first; the first
+ * such page wins when several were selected.
+ */
+export function selectExportParent(pages: AccessiblePage[]): AccessiblePage | null {
+  const ids = new Set(pages.map((page) => page.id));
+  return pages.find((page) => !page.parentPageId || !ids.has(page.parentPageId)) ?? null;
 }
 
 export async function listAccessiblePages(
@@ -59,6 +61,7 @@ export function mapSearchResults(payload: unknown): AccessiblePage[] {
         "url" in result && typeof result.url === "string" && result.url.startsWith("https://")
           ? result.url
           : `https://www.notion.so/${result.id.replaceAll("-", "")}`,
+      ...readParentPageId(result),
     });
   }
   return pages;
@@ -85,17 +88,14 @@ export function readPageTitle(page: unknown): string {
   return "Untitled";
 }
 
-export async function validateParentPage(
-  token: string,
-  pageId: string,
-  fetchImpl: typeof fetch = fetch,
-): Promise<string> {
-  const normalized = normalizeParentPageId(pageId);
-  if (!normalized) {
-    throw new NotionPageError("That is not a Notion page id or page URL.");
+function readParentPageId(result: object): { parentPageId?: string } {
+  if (!("parent" in result) || typeof result.parent !== "object" || result.parent === null) {
+    return {};
   }
-  await notionFetch(fetchImpl, token, `/v1/pages/${normalized}`, { method: "GET" });
-  return normalized;
+  const parent = result.parent;
+  return "page_id" in parent && typeof parent.page_id === "string"
+    ? { parentPageId: parent.page_id }
+    : {};
 }
 
 function plainText(items: unknown[]): string {

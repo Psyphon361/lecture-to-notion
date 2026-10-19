@@ -26,7 +26,7 @@ export function ConnectGate({ initialStatus }: { initialStatus: NotionStatus }) 
         )}
         <p className="text-sm text-zinc-500">
           {ready
-            ? "Connected. You can choose a parent page now or when the notes are ready."
+            ? "Connected. Notes export to the page you selected in Notion."
             : "Connect Notion to unlock the upload step."}
         </p>
       </div>

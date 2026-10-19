@@ -74,7 +74,6 @@ function status(connected: boolean): NotionStatus {
     workspaceName: null,
     parentPageId: connected ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" : null,
     needsParentPage: false,
-    canPickParent: false,
   };
 }
 

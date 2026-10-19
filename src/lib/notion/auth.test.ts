@@ -27,17 +27,17 @@ describe("resolveNotionAuth", () => {
     expect(auth.accessToken).toBe("oauth-access");
     expect(auth.refreshToken).toBe("oauth-refresh");
     expect(auth.sessionKey).toEqual(key);
-    expect(auth.parentPageId).toBe(parentPageId);
+    expect(auth.parentPageId).toBeUndefined();
     expect(auth.session).toEqual(session);
   });
 
-  it("uses the session parent page before the env parent page", () => {
-    const session = { ...sample(), parentPageId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" };
+  it("ignores NOTION_PARENT_PAGE_ID for an OAuth session", () => {
     const auth = resolveNotionAuth(
-      request(sessionCookie(session, key)),
-      oauthEnv(key),
+      request(sessionCookie(sample(), key)),
+      oauthEnv(key, { NOTION_PARENT_PAGE_ID: parentPageId }),
     );
-    expect(auth.parentPageId).toBe("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+    expect(auth.mode).toBe("oauth");
+    expect(auth.parentPageId).toBeUndefined();
   });
 
   it("falls back to the server token and then to no connection", () => {
@@ -115,7 +115,6 @@ describe("ensureFreshToken", () => {
     expect(result.auth.refreshToken).toBe("new-refresh");
     expect(result.session?.accessToken).toBe("new-access");
     expect(result.session?.refreshToken).toBe("new-refresh");
-    expect(result.session?.parentPageId).toBeUndefined();
   });
 
   it("asks for a reconnect when 401 cannot be refreshed", async () => {

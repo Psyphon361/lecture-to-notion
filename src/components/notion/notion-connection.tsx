@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { ParentPagePicker } from "@/components/notion/parent-page-picker";
 import {
   notionErrorResponseSchema,
   notionStatusSchema,
@@ -150,10 +149,7 @@ export function NotionConnection({
         ) : null}
       </div>
 
-      {status?.needsParentPage && status.canPickParent ? (
-        <ParentPagePicker onSelected={loadStatus} />
-      ) : null}
-      {status?.needsParentPage && !status.canPickParent ? (
+      {status?.needsParentPage ? (
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
           Set NOTION_PARENT_PAGE_ID on the server to choose the export location.
         </p>

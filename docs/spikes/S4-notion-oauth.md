@@ -38,7 +38,7 @@ Generate the key with:
 openssl rand -base64 32
 ```
 
-Keep `NOTION_TOKEN` if the fallback path is still wanted. `NOTION_PARENT_PAGE_ID` is optional; when set it overrides the in-app picker.
+Keep `NOTION_TOKEN` if the fallback path is still wanted. `NOTION_PARENT_PAGE_ID` is ignored for OAuth (it is only for the `NOTION_TOKEN` fallback). Export goes to the page selected on the consent screen; remove the variable from `.env.local` if present.
 
 ## Checks
 
@@ -53,8 +53,7 @@ Record each result here.
 | Token response includes `access_token` and `refresh_token` | not run |
 | Session cookie is `HttpOnly` and encrypted; tokens are not readable from the browser | not run |
 | `/api/notion/status` shows the workspace name and no tokens | not run |
-| `/api/notion/pages` lists only pages shared with the connection | not run |
-| `/api/notion/parent` stores a chosen page in the session | not run |
+| Export parent is the page selected on the consent screen (not its children) | not run |
 | Export creates a page under the chosen parent | not run |
 | Disconnect clears the session and disables export | not run |
 | A forced 401 refreshes once and retries the export | not run |
@@ -66,7 +65,7 @@ Record each result here.
 - `[VERIFY]` The refresh request shape and response. The Authorization guide documents `grant_type: "refresh_token"` at `/v1/oauth/token`; the reference page currently shows only the authorization-code body.
 - `[VERIFY]` That `http://localhost:3000` is accepted as a redirect URI for the connection.
 - `[VERIFY]` That the access token expiry behavior matches the refresh design. If Notion does not expire access tokens in practice, the refresh path should remain a 401 recovery only.
-- `[VERIFY]` That a page set via `NOTION_PARENT_PAGE_ID` is visible to the connection only when the user selected it in the page picker.
+- `[VERIFY]` That `POST /v1/search` returns the selected page with a non-page parent (workspace) so `selectExportParent` finds it as the root.
 
 ## Rollback
 

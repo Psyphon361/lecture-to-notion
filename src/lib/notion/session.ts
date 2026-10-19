@@ -39,7 +39,6 @@ export const notionSessionSchema = z.object({
   workspaceName: z.string().optional(),
   ownerName: z.string().optional(),
   connectedAt: z.string().min(1),
-  parentPageId: z.string().min(1).optional(),
 });
 
 export type NotionSession = z.infer<typeof notionSessionSchema>;

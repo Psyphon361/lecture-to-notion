@@ -24,7 +24,6 @@ describe("GET /api/notion/status", () => {
       workspaceName: null,
       parentPageId: null,
       needsParentPage: false,
-      canPickParent: false,
     });
     expect(JSON.stringify(payload)).not.toContain("token");
   });
@@ -41,12 +40,11 @@ describe("GET /api/notion/status", () => {
       mode: "token",
       parentPageId,
       needsParentPage: false,
-      canPickParent: false,
     });
     expect(JSON.stringify(payload)).not.toContain("server-token");
   });
 
-  it("reports an OAuth workspace and asks for a parent page when missing", async () => {
+  it("reports an OAuth workspace without needing a configured parent page", async () => {
     const response = await handleNotionStatus(
       request(sessionCookie(sample(), key)),
       oauthEnv(key),
@@ -59,8 +57,7 @@ describe("GET /api/notion/status", () => {
       mode: "oauth",
       workspaceName: "Lecture workspace",
       parentPageId: null,
-      needsParentPage: true,
-      canPickParent: true,
+      needsParentPage: false,
     });
     expect(JSON.stringify(payload)).not.toContain("oauth-access");
   });

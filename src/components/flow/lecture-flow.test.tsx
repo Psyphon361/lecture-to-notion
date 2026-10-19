@@ -286,7 +286,6 @@ describe("lecture flow", () => {
           workspaceName: null,
           parentPageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
           needsParentPage: false,
-          canPickParent: false,
         });
       }
       if (url.endsWith("/api/notion/export")) {

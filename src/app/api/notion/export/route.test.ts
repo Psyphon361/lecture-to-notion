@@ -61,10 +61,12 @@ describe("POST /api/notion/export", () => {
     expect(calls).toEqual(["/v1/pages"]);
   });
 
-  it("preflights and exports with an OAuth session", async () => {
+  it("exports under the page selected in Notion, ignoring NOTION_PARENT_PAGE_ID", async () => {
     const key = Buffer.alloc(32, 7);
     const env = oauthEnv(key);
+    const selectedId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const calls: string[] = [];
+    let createBody: { parent?: { page_id?: string } } = {};
     const response = await handleNotionExport(
       jsonRequest(
         { document: paragraphDocument("Lecture") },
@@ -79,6 +81,15 @@ describe("POST /api/notion/export", () => {
           if (url.pathname === "/v1/users/me") {
             return jsonResponse({ object: "user", id: "user-1" });
           }
+          if (url.pathname === "/v1/search") {
+            return jsonResponse({
+              results: [
+                { object: "page", id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", parent: { type: "page_id", page_id: selectedId } },
+                { object: "page", id: selectedId, parent: { type: "workspace", workspace: true } },
+              ],
+            });
+          }
+          createBody = JSON.parse(String(init?.body)) as typeof createBody;
           return jsonResponse({ id: "page-1", url: "https://www.notion.so/Lecture" });
         },
       },
@@ -87,8 +98,28 @@ describe("POST /api/notion/export", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true, pageUrl: "https://www.notion.so/Lecture" });
-    expect(calls).toEqual(["GET /v1/users/me", "POST /v1/pages"]);
+    expect(calls).toEqual(["GET /v1/users/me", "POST /v1/search", "POST /v1/pages"]);
+    expect(createBody.parent?.page_id).toBe(selectedId);
     expect(JSON.stringify(payload)).not.toContain("oauth-token");
+  });
+
+  it("asks to reconnect when no page was shared during OAuth", async () => {
+    const key = Buffer.alloc(32, 7);
+    const response = await handleNotionExport(
+      jsonRequest({ document: paragraphDocument("Lecture") }, sessionCookie(session(), key)),
+      {
+        storage: unusedStorage(),
+        env: oauthEnv(key),
+        fetch: async (input) =>
+          new URL(String(input)).pathname === "/v1/search"
+            ? jsonResponse({ results: [] })
+            : jsonResponse({ object: "user" }),
+      },
+    );
+    const payload = (await response.json()) as { ok: boolean; message: string };
+
+    expect(response.status).toBe(400);
+    expect(payload.message).toMatch(/select the page/);
   });
 
   it("asks the browser to reconnect when the OAuth token is rejected", async () => {
