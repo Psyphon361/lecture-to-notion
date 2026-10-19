@@ -55,7 +55,7 @@ export function UploadDropzone({
         }}
       >
         <span className="font-medium">Drop your PowerPoint here</span>
-        <span className="text-sm text-zinc-500">.pptx only, up to 50 MB. Extracted images stay on this computer.</span>
+        <span className="text-sm text-zinc-500">.pptx only, up to 50 MB.</span>
         <input
           className="sr-only"
           type="file"

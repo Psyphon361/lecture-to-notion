@@ -1,4 +1,5 @@
-import { createLocalStorage, parseImageKey, StorageError } from "@/lib/storage/storage";
+import { createStorage } from "@/lib/storage/default-storage";
+import { parseImageKey, StorageError } from "@/lib/storage/storage";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,7 @@ export async function GET(_request: Request, context: AssetRouteContext): Promis
     throw error;
   }
 
-  const storage = createLocalStorage();
+  const storage = createStorage();
   let bytes: Uint8Array | null;
   let info: { contentType: string } | null;
   try {

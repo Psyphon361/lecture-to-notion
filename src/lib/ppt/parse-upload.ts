@@ -1,7 +1,7 @@
 import { PptxParseError, parsePptx } from "@/lib/ppt/parse-pptx";
 import type { Presentation } from "@/lib/ppt/schema";
+import { createStorage } from "@/lib/storage/default-storage";
 import {
-  createLocalStorage,
   createRunId,
   imageAssetKey,
   type Storage,
@@ -34,7 +34,7 @@ export type ParseUploadResult = ParseUploadSuccess | ParseUploadFailure;
  */
 export async function parseUpload(
   input: { filename: string; bytes: Uint8Array },
-  storage: Storage = createLocalStorage(),
+  storage: Storage = createStorage(),
   runId = createRunId(),
 ): Promise<ParseUploadResult> {
   const filename = uploadBasename(input.filename);

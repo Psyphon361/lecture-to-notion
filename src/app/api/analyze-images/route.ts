@@ -9,14 +9,15 @@ import {
 import { analyzeErrorResponse, analyzeImageWithGemini, GeminiCallError } from "@/lib/ai/gemini";
 import type { ImageInput } from "@/lib/ai/provider";
 import type { ImageAnalysis } from "@/lib/ai/schema";
-import { createLocalStorage, imageAssetKey, type Storage } from "@/lib/storage/storage";
+import { createStorage } from "@/lib/storage/default-storage";
+import { imageAssetKey, type Storage } from "@/lib/storage/storage";
 
 export const runtime = "nodejs";
 
 type AnalyzeFn = (input: ImageInput) => Promise<{ analysis: ImageAnalysis }>;
 
 export async function POST(request: Request): Promise<Response> {
-  return handleAnalyzeImages(request, createLocalStorage(), analyzeImageWithGemini);
+  return handleAnalyzeImages(request, createStorage(), analyzeImageWithGemini);
 }
 
 export async function handleAnalyzeImages(

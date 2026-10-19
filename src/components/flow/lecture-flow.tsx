@@ -1,5 +1,6 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import { useEffect, useRef, useState } from "react";
 
 import { NotionConnection } from "@/components/notion/notion-connection";
@@ -64,7 +65,11 @@ type FlowState =
 
 const MAX_RATE_LIMIT_WAITS = 3;
 
-export function LectureFlow() {
+/**
+ * `directUpload` sends the deck straight to Blob, then asks the server to parse it.
+ * Vercel caps a function body at 4.5 MB, so decks go through Blob when a store is connected.
+ */
+export function LectureFlow({ directUpload = false }: { directUpload?: boolean }) {
   const [flow, setFlow] = useState<FlowState>({ phase: "idle" });
 
   async function onAccepted(file: File) {
@@ -74,9 +79,9 @@ export function LectureFlow() {
       stages: initialStages(),
     });
     try {
-      const body = new FormData();
-      body.set("file", file);
-      const response = await fetch("/api/parse", { method: "POST", body });
+      const response = directUpload
+        ? await parseViaBlob(file)
+        : await parseDirect(file);
       const payload: unknown = await response.json();
       const success = parseSuccessSchema.safeParse(payload);
       if (response.ok && success.success) {
@@ -453,6 +458,28 @@ async function requestImageAnalysis(
     return { ok: false, message: "Image analysis failed. Try the file again." };
   }
 }
+
+async function parseDirect(file: File): Promise<Response> {
+  const body = new FormData();
+  body.set("file", file);
+  return fetch("/api/parse", { method: "POST", body });
+}
+
+async function parseViaBlob(file: File): Promise<Response> {
+  const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, "_").slice(-200);
+  const blob = await upload(`uploads/${crypto.randomUUID()}/${safeName}`, file, {
+    access: "private",
+    handleUploadUrl: "/api/upload/token",
+    contentType: file.type || PPTX_MIME,
+  });
+  return fetch("/api/parse", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ blobPathname: blob.pathname, filename: file.name }),
+  });
+}
+
+const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 function mergeOutcomes(base: ImageOutcome[], extra: ImageOutcome[]): ImageOutcome[] {
   const byId = new Map(base.map((outcome) => [outcome.imageId, outcome]));
