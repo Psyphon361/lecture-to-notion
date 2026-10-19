@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { NotionConnection } from "@/components/notion/notion-connection";
 import { ProcessingStatus } from "@/components/processing/processing-status";
 import { SlideWorkspace } from "@/components/review/slide-workspace";
 import { UploadDropzone } from "@/components/upload/upload-dropzone";
@@ -17,6 +18,7 @@ import {
 import { fallbackSlideNotes } from "@/lib/ai/slide-fallback";
 import { organizeLocally } from "@/lib/documents/organize-locally";
 import type { NoteDocument, SlideNotes } from "@/lib/documents/schema";
+import type { NotionStatus } from "@/lib/notion/contracts";
 import { parseFailureSchema, parseSuccessSchema } from "@/lib/ppt/parse-response";
 import type { Presentation } from "@/lib/ppt/schema";
 import {
@@ -213,6 +215,7 @@ export function LectureFlow() {
     const waiting = flow;
     return (
       <RateLimitWait
+        key={waiting.waitCount}
         filename={waiting.filename}
         secondsLeft={waiting.secondsLeft}
         stages={stagesWhileAnalyzing()}
@@ -333,6 +336,7 @@ function NotionExport({ document }: { document: NoteDocument }) {
   const [exporting, setExporting] = useState(false);
   const [pageUrl, setPageUrl] = useState<string>();
   const [message, setMessage] = useState<string>();
+  const [status, setStatus] = useState<NotionStatus | null>(null);
 
   async function onExport() {
     setExporting(true);
@@ -358,12 +362,15 @@ function NotionExport({ document }: { document: NoteDocument }) {
     }
   }
 
+  const blocked = status !== null && (!status.connected || status.needsParentPage);
+
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div className="flex flex-col items-start gap-3">
+      <NotionConnection connectMode="new-tab" onStatus={setStatus} />
       <button
         type="button"
         className={primaryButtonClass}
-        disabled={exporting}
+        disabled={exporting || blocked}
         onClick={() => void onExport()}
       >
         {exporting ? "Exporting…" : "Export to Notion"}
@@ -476,11 +483,6 @@ function RateLimitWait({
 }) {
   const [secondsLeft, setSecondsLeft] = useState(initialSeconds);
   const finished = useRef(false);
-
-  useEffect(() => {
-    setSecondsLeft(initialSeconds);
-    finished.current = false;
-  }, [initialSeconds]);
 
   useEffect(() => {
     if (secondsLeft <= 0) {

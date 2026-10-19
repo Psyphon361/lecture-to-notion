@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { THEME_STORAGE_KEY } from "@/lib/theme";
 
 let root: Root | undefined;
 
@@ -16,6 +17,7 @@ afterEach(() => {
   root = undefined;
   document.body.innerHTML = "";
   document.documentElement.classList.remove("dark");
+  localStorage.clear();
 });
 
 describe("theme toggle", () => {
@@ -34,6 +36,24 @@ describe("theme toggle", () => {
       expect(label.className).toContain("sr-only");
     }
     expect(button.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("flips the dark class and saves the choice", async () => {
+    const container = await render(<ThemeToggle />);
+    const button = container.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing theme button");
+
+    await act(async () => {
+      button.click();
+    });
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+
+    await act(async () => {
+      button.click();
+    });
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
   });
 });
 

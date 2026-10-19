@@ -164,10 +164,6 @@ function useRotatingLine(lines: readonly string[] | undefined, reduced: boolean)
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
-    setIndex(0);
-  }, [lines]);
-
-  useEffect(() => {
     if (!lines || lines.length < 2 || reduced) return;
     const timer = window.setInterval(() => {
       setIndex((current) => (current + 1) % lines.length);
@@ -177,5 +173,6 @@ function useRotatingLine(lines: readonly string[] | undefined, reduced: boolean)
 
   if (!lines || lines.length === 0) return undefined;
   if (reduced) return lines[0];
-  return lines[index] ?? lines[0];
+  // A row keeps its own counter, so the index can point past a newly set line list.
+  return lines[index % lines.length] ?? lines[0];
 }

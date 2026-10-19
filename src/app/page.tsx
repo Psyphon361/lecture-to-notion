@@ -14,10 +14,10 @@ export default function Home() {
           Turn a lecture PowerPoint into Notion study notes.
         </p>
         <Link
-          href="/app"
+          href="/connect"
           className="rounded-full bg-zinc-900 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
         >
-          Open the app
+          Get started
         </Link>
       </div>
     </main>

@@ -242,8 +242,9 @@ describe("lecture flow", () => {
               analysis: {
                 imageId: "img-1",
                 containsUsefulInformation: true,
+                kind: "text",
                 extractedText: "Words in the picture",
-                description: "A diagram of the conflict.",
+                description: "A quote on a red background.",
               },
             },
           ],
@@ -258,7 +259,7 @@ describe("lecture flow", () => {
     expect(container.textContent).toContain("Need and meaning");
     expect(container.textContent).toContain("Conflict on the slide");
     expect(container.textContent).toContain("Words in the picture");
-    expect(container.textContent).toContain("A diagram of the conflict.");
+    expect(container.textContent).not.toContain("A quote on a red background.");
     expect(container.textContent).toContain("Structured.");
     expect(container.textContent).toContain("Organization is done.");
     expect(calls.filter((url) => url.endsWith("/api/process-slide"))).toHaveLength(0);
@@ -275,6 +276,18 @@ describe("lecture flow", () => {
       }
       if (url.endsWith("/api/analyze-images")) {
         return json({ ok: true, outcomes: [] });
+      }
+      if (url.endsWith("/api/notion/status")) {
+        return json({
+          ok: true,
+          oauthConfigured: false,
+          connected: true,
+          mode: "token",
+          workspaceName: null,
+          parentPageId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          needsParentPage: false,
+          canPickParent: false,
+        });
       }
       if (url.endsWith("/api/notion/export")) {
         exportAttempts += 1;

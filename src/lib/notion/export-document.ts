@@ -1,6 +1,5 @@
 import {
   ARRAY_LIMIT,
-  NOTION_VERSION,
   chunkBlocks,
   isImagePlaceholder,
   mapNoteDocument,
@@ -8,6 +7,11 @@ import {
   type MappedBlock,
   type NotionBlock,
 } from "@/lib/notion/adapter";
+import {
+  NotionApiError,
+  notionFetch,
+  redactSecrets,
+} from "@/lib/notion/client";
 import type { NoteDocument } from "@/lib/documents/schema";
 import type { Storage } from "@/lib/storage/storage";
 
@@ -61,7 +65,7 @@ export async function exportNoteDocument(input: NotionExportInput): Promise<Noti
 
   let created: unknown;
   try {
-    created = await notionRequest(fetchImpl, token, "/v1/pages", {
+    created = await notionFetch(fetchImpl, token, "/v1/pages", {
       method: "POST",
       json: createBody,
     });
@@ -76,7 +80,7 @@ export async function exportNoteDocument(input: NotionExportInput): Promise<Noti
 
   try {
     for (const children of rest) {
-      await notionRequest(fetchImpl, token, `/v1/blocks/${page.id}/children`, {
+      await notionFetch(fetchImpl, token, `/v1/blocks/${page.id}/children`, {
         method: "PATCH",
         json: { children },
       });
@@ -130,7 +134,7 @@ async function uploadImage(
   const filename = filenameFor(block.assetId, info.contentType);
   let created: unknown;
   try {
-    created = await notionRequest(fetchImpl, token, "/v1/file_uploads", {
+    created = await notionFetch(fetchImpl, token, "/v1/file_uploads", {
       method: "POST",
       json: {
         mode: "single_part",
@@ -149,7 +153,7 @@ async function uploadImage(
   new Uint8Array(copy).set(bytes);
   form.set("file", new Blob([copy], { type: info.contentType }), filename);
   try {
-    await notionRequest(fetchImpl, token, `/v1/file_uploads/${uploadId}/send`, {
+    await notionFetch(fetchImpl, token, `/v1/file_uploads/${uploadId}/send`, {
       method: "POST",
       form,
     });
@@ -185,64 +189,6 @@ const EXTENSIONS: Record<string, string> = {
   "image/svg+xml": "svg",
 };
 
-interface NotionCall {
-  method: "POST" | "PATCH";
-  json?: unknown;
-  form?: FormData;
-}
-
-async function notionRequest(
-  fetchImpl: typeof fetch,
-  token: string,
-  path: string,
-  call: NotionCall,
-): Promise<unknown> {
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    "Notion-Version": NOTION_VERSION,
-  };
-  let body: BodyInit | undefined;
-  if (call.form) {
-    body = call.form;
-  } else {
-    headers["Content-Type"] = "application/json";
-    body = JSON.stringify(call.json ?? {});
-  }
-
-  let response: Response;
-  try {
-    response = await fetchImpl(`https://api.notion.com${path}`, {
-      method: call.method,
-      headers,
-      body,
-    });
-  } catch {
-    throw new ExportFailed("Notion could not be reached.", 502);
-  }
-
-  const payload = await readJson(response);
-  if (!response.ok) {
-    throw new ExportFailed(notionMessage(payload, response.status), 502);
-  }
-  return payload;
-}
-
-async function readJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json();
-  } catch {
-    return null;
-  }
-}
-
-function notionMessage(payload: unknown, status: number): string {
-  if (typeof payload === "object" && payload !== null && "message" in payload && typeof payload.message === "string") {
-    const message = payload.message.trim();
-    if (message.length > 0) return message.slice(0, 500);
-  }
-  return `Notion returned status ${status}.`;
-}
-
 function readId(payload: unknown): string | null {
   if (typeof payload !== "object" || payload === null || !("id" in payload)) return null;
   return typeof payload.id === "string" && payload.id.length > 0 ? payload.id : null;
@@ -277,11 +223,11 @@ class ExportFailed extends Error {
 
 function statusFor(error: unknown): number {
   if (error instanceof ExportFailed) return error.status;
+  if (error instanceof NotionApiError) return error.status === 401 ? 401 : 502;
   return 502;
 }
 
 function publicMessage(error: unknown, token: string): string {
   const message = error instanceof Error ? error.message : "Notion rejected the export.";
-  const redacted = token.length > 0 ? message.split(token).join("[redacted]") : message;
-  return redacted.slice(0, 500);
+  return redactSecrets(message, token);
 }
